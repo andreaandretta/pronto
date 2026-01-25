@@ -1,3 +1,7 @@
+#!/bin/bash
+
+# 1. Aggiornamento UI React: Layout a "Badge" compatto
+cat << 'INNER_EOF' > frontend/src/App.jsx
 import { useState, useEffect } from 'react'
 
 const WhatsAppIcon = ({ size = 20 }) => (
@@ -48,3 +52,6 @@ export default function App() {
     </div>
   );
 }
+INNER_EOF
+
+echo "✅ App.jsx aggiornato con layout Badge!"
