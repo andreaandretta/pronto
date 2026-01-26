@@ -1,3 +1,6 @@
+#!/bin/bash
+# 1. Aggiornamento UI con Logo e Design Avanzato
+cat << 'INNER_EOF' > frontend/src/App.jsx
 import { useState, useEffect } from 'react'
 
 const ProntoLogo = () => (
@@ -82,3 +85,14 @@ export default function App() {
     </div>
   );
 }
+INNER_EOF
+
+# 2. Pulizia e Riavvio
+echo "🧹 Pulizia cache e riavvio..."
+rm -rf frontend/dist
+cd frontend && npm run build
+mkdir -p ../android/app/src/main/assets/www
+cp -r dist/* ../android/app/src/main/assets/www/
+cd ..
+
+echo "✅ Fatto! Controlla ora l'URL Cloudflare o GitHub Actions."
