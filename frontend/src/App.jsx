@@ -12,9 +12,31 @@ export default function App() {
       setPhoneNumber(decodeURIComponent(phone))
     }
 
-    // Esponi la funzione globalmente per Android
+    // Esponi le funzioni globalmente per Android Bridge
     window.setPhoneNumber = (number) => {
+      console.log('setPhoneNumber called with:', number)
       setPhoneNumber(number)
+    }
+    
+    window.setCallerName = (name) => {
+      console.log('setCallerName called with:', name)
+      setCallerName(name)
+    }
+    
+    window.updateCallerInfo = (number, name) => {
+      console.log('updateCallerInfo called:', number, name)
+      if (number) setPhoneNumber(number)
+      if (name) setCallerName(name)
+    }
+    
+    // Prova a ottenere il numero dal bridge Android se disponibile
+    if (window.Android && window.Android.getPhoneNumber) {
+      try {
+        const num = window.Android.getPhoneNumber()
+        if (num) setPhoneNumber(num)
+      } catch (e) {
+        console.log('Could not get phone number from Android bridge')
+      }
     }
   }, [])
 
@@ -22,7 +44,11 @@ export default function App() {
     console.log('Action:', type)
     // Chiama il bridge Android se disponibile
     if (window.Android && window.Android.performAction) {
-      window.Android.performAction(type)
+      try {
+        window.Android.performAction(type)
+      } catch (e) {
+        console.error('Android bridge error:', e)
+      }
     } else {
       console.log('Android bridge not available - browser mode')
       // In browser mode, mostra un alert

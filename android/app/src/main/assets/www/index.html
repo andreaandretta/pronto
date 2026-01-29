@@ -2,12 +2,46 @@
 <html>
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0" />
 <title>PRONTO</title>
-  <script type="module" crossorigin src="/assets/index-Don0hWJA.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-Wb8bPXrr.css">
+<script type="module" crossorigin src="./assets/index-BLyJ17I8.js"></script>
+<link rel="stylesheet" crossorigin href="./assets/index-DlccBQ3m.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { 
+    margin: 0; 
+    padding: 0; 
+    background: transparent !important;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  #root {
+    min-height: 100vh;
+    width: 100%;
+  }
+  /* Fallback loading indicator */
+  #root:empty::before {
+    content: 'Caricamento...';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    color: white;
+    font-family: system-ui, sans-serif;
+    font-size: 18px;
+  }
+</style>
 </head>
 <body class="bg-transparent">
 <div id="root"></div>
-</body>
-</html>
+<script>
+  // Debug logging per Android
+  console.log('PRONTO: HTML loaded');
+  window.onerror = function(msg, url, line) {
+    console.error('PRONTO Error:', msg, 'at', url, ':', line);
+    if (window.Android && window.Android.log) {
+      window.Android.log('Error: ' + msg);
+    }
+    return false;
+  };
+</script>

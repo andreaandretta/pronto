@@ -55,15 +55,31 @@ class CallerIdService : Service() {
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+            settings.allowFileAccess = true
+            settings.allowContentAccess = true
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.setSupportZoom(false)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            
+            addJavascriptInterface(AndroidBridge(), "Android")
+            
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
+                    val escapedNumber = incomingNumber.replace("'", "\\'")
                     view?.evaluateJavascript(
-                        "window.updateCallerInfo && window.updateCallerInfo('$incomingNumber', 'Numero Sconosciuto')",
+                        "if(window.setPhoneNumber) window.setPhoneNumber('$escapedNumber');",
                         null
                     )
                 }
+                
+                override fun onReceivedError(view: WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                    android.util.Log.e("CallerIdService", "WebView error: ${error?.description}")
+                }
             }
+            
+            // Carica l'HTML con path relativi
             loadUrl("file:///android_asset/www/index.html")
         }
 
@@ -73,12 +89,18 @@ class CallerIdService : Service() {
     inner class AndroidBridge {
         @JavascriptInterface
         fun performAction(action: String) {
-            when (action) {
-                "whatsapp" -> openWhatsApp()
-                "answer" -> answerCall()
-                "reject" -> rejectCall()
-                "close" -> closeOverlay()
+            android.util.Log.d("CallerIdService", "Action received: $action")
+            when (action.uppercase()) {
+                "WHATSAPP" -> openWhatsApp()
+                "ANSWER" -> answerCall()
+                "REJECT" -> rejectCall()
+                "CLOSE" -> closeOverlay()
             }
+        }
+        
+        @JavascriptInterface
+        fun getPhoneNumber(): String {
+            return incomingNumber
         }
     }
 
