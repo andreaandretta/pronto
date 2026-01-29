@@ -3,8 +3,11 @@ import { useState, useEffect } from 'react'
 export default function App() {
   const [phoneNumber, setPhoneNumber] = useState('+39 333 1234567')
   const [callerName, setCallerName] = useState('Numero Sconosciuto')
+  const [isReady, setIsReady] = useState(false)
 
   useEffect(() => {
+    console.log('PRONTO: App mounted')
+    
     // Leggi il numero dal parametro URL (passato dall'Android)
     const urlParams = new URLSearchParams(window.location.search)
     const phone = urlParams.get('phone')
@@ -14,17 +17,17 @@ export default function App() {
 
     // Esponi le funzioni globalmente per Android Bridge
     window.setPhoneNumber = (number) => {
-      console.log('setPhoneNumber called with:', number)
+      console.log('PRONTO: setPhoneNumber called with:', number)
       setPhoneNumber(number)
     }
     
     window.setCallerName = (name) => {
-      console.log('setCallerName called with:', name)
+      console.log('PRONTO: setCallerName called with:', name)
       setCallerName(name)
     }
     
     window.updateCallerInfo = (number, name) => {
-      console.log('updateCallerInfo called:', number, name)
+      console.log('PRONTO: updateCallerInfo called:', number, name)
       if (number) setPhoneNumber(number)
       if (name) setCallerName(name)
     }
@@ -35,32 +38,47 @@ export default function App() {
         const num = window.Android.getPhoneNumber()
         if (num) setPhoneNumber(num)
       } catch (e) {
-        console.log('Could not get phone number from Android bridge')
+        console.log('PRONTO: Could not get phone number from Android bridge')
       }
+    }
+    
+    // Segna come pronto e nascondi loading
+    setIsReady(true)
+    if (window.hideLoading) {
+      setTimeout(() => window.hideLoading(), 100)
+    }
+    
+    return () => {
+      console.log('PRONTO: App unmounting')
     }
   }, [])
 
   const action = (type) => {
-    console.log('Action:', type)
+    console.log('PRONTO: Action:', type)
     // Chiama il bridge Android se disponibile
     if (window.Android && window.Android.performAction) {
       try {
         window.Android.performAction(type)
       } catch (e) {
-        console.error('Android bridge error:', e)
+        console.error('PRONTO: Android bridge error:', e)
       }
     } else {
-      console.log('Android bridge not available - browser mode')
+      console.log('PRONTO: Android bridge not available - browser mode')
       // In browser mode, mostra un alert
       alert('Azione: ' + type + ' per ' + phoneNumber)
     }
+  }
+
+  // Se non ancora pronto, mostra nulla (la schermata di caricamento HTML gestisce tutto)
+  if (!isReady) {
+    return null
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-700 via-teal-600 to-emerald-500 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Card principale */}
-        <div className="bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
+        <div className="bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-fadeIn">
           {/* Header con icona */}
           <div className="bg-gradient-to-br from-teal-800 to-teal-700 pt-8 pb-12 px-6 text-center">
             <div className="w-20 h-20 mx-auto bg-gray-500/30 rounded-full flex items-center justify-center mb-4">

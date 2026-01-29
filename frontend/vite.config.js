@@ -7,13 +7,23 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    // Genera asset con path relativi
+    // Target ES2015 per compatibilità WebView Android
+    target: 'es2015',
+    // Minificazione controllata
+    minify: 'esbuild',
+    esbuildOptions: {
+      keepNames: true,
+    },
     rollupOptions: {
       output: {
-        // Nomi file più stabili per evitare problemi di cache
+        // Nomi file più stabili
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash].[ext]'
+        assetFileNames: (assetInfo) => {
+          const info = assetInfo.name.split('.')
+          const ext = info[info.length - 1]
+          return `assets/[name]-[hash][extname]`
+        }
       }
     }
   },
