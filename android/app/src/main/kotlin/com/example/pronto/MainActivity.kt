@@ -62,7 +62,13 @@ class MainActivity : AppCompatActivity() {
     
     override fun onResume() {
         super.onResume()
+        // Always refresh permission status when returning to app
+        android.util.Log.d(TAG, "onResume: Refreshing all permission statuses")
         updatePermissionStatus()
+        
+        // Force UI refresh
+        permissionsCard.invalidate()
+        permissionsCard.requestLayout()
     }
     
     private fun createModernUI() {
@@ -373,34 +379,51 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun updatePermissionStatus() {
+        android.util.Log.d(TAG, "updatePermissionStatus() called")
+        
         // Check overlay permission
         val hasOverlay = Settings.canDrawOverlays(this)
         overlayStatus.text = if (hasOverlay) "✅" else "❌"
+        android.util.Log.d(TAG, "  Overlay: $hasOverlay")
         
         // Check phone permissions
         val hasPhone = ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
                        ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
         phoneStatus.text = if (hasPhone) "✅" else "❌"
+        android.util.Log.d(TAG, "  Phone: $hasPhone")
         
         // Check notification permission (Android 13+)
         val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         } else true
         notificationStatus.text = if (hasNotification) "✅" else "❌"
+        android.util.Log.d(TAG, "  Notification: $hasNotification")
         
         // Check battery optimization
         val hasBattery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            pm.isIgnoringBatteryOptimizations(packageName)
+            val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
+            android.util.Log.d(TAG, "  Battery optimization ignored: $ignoring")
+            ignoring
         } else true
         batteryStatus.text = if (hasBattery) "✅" else "❌"
+        
+        // Force immediate UI update
+        overlayStatus.invalidate()
+        phoneStatus.invalidate()
+        notificationStatus.invalidate()
+        batteryStatus.invalidate()
         
         // Hide permissions card if all granted
         val allGranted = hasOverlay && hasPhone && hasNotification && hasBattery
         permissionsCard.visibility = if (allGranted) View.GONE else View.VISIBLE
         
-        // Log status for debugging
-        android.util.Log.d(TAG, "Permissions: overlay=$hasOverlay, phone=$hasPhone, notification=$hasNotification, battery=$hasBattery")
+        android.util.Log.d(TAG, "  All granted: $allGranted, Card visible: ${!allGranted}")
+        
+        // If all permissions granted, show success toast
+        if (allGranted) {
+            Toast.makeText(this, "✅ Tutte le autorizzazioni OK!", Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun checkRuntimePermissions(): Boolean {
