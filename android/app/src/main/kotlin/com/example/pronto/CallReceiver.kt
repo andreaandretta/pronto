@@ -16,6 +16,7 @@ class CallReceiver : BroadcastReceiver() {
         private const val TAG = "CallReceiver"
         private const val DEBOUNCE_MS = 500L
         private const val PRIVATE_NUMBER_DELAY_MS = 1500L // Wait 1.5s for real number
+        private const val SERVICE_SAFETY_TIMEOUT_MS = 30_000L // 30 second safety timeout
         
         // Race condition prevention: atomic flag for service start
         private val isStartingService = AtomicBoolean(false)
@@ -29,6 +30,7 @@ class CallReceiver : BroadcastReceiver() {
     // Handler for delayed operations - cancellable
     private val handler = Handler(Looper.getMainLooper())
     private var pendingNumberRunnable: Runnable? = null
+    private var safetyTimeoutRunnable: Runnable? = null
     
     // Sanitize phone number to prevent injection
     private fun sanitizePhoneNumber(input: String?): String {
@@ -124,15 +126,25 @@ class CallReceiver : BroadcastReceiver() {
                 }
                 TelephonyManager.EXTRA_STATE_IDLE,
                 TelephonyManager.EXTRA_STATE_OFFHOOK -> {
-                    Log.d(TAG, "Call ended or answered")
-                    // Cancel any pending timers
+                    Log.d(TAG, "Call ended or answered - FORCING immediate cleanup")
+                    
+                    // CRITICAL: Cancel ALL pending timers immediately
                     pendingNumberRunnable?.let { handler.removeCallbacks(it) }
                     pendingNumberRunnable = null
-                    // Reset state flags
+                    safetyTimeoutRunnable?.let { handler.removeCallbacks(it) }
+                    safetyTimeoutRunnable = null
+                    handler.removeCallbacksAndMessages(null) // Nuclear option: remove ALL callbacks
+                    
+                    // Reset ALL state flags
                     isStartingService.set(false)
                     serviceStarted = false
                     currentServiceNumber = null
+                    lastRingingTime = 0L
+                    
+                    // Force stop service
                     stopCallerIdService(context)
+                    
+                    Log.d(TAG, "Cleanup complete - all state reset")
                 }
                 else -> {
                     Log.d(TAG, "Unknown state: $state")
@@ -172,6 +184,25 @@ class CallReceiver : BroadcastReceiver() {
             Handler(Looper.getMainLooper()).postDelayed({
                 isStartingService.set(false)
             }, 1000)
+            
+            // SAFETY NET: Auto-stop service after 30 seconds if still running
+            // This handles edge cases where IDLE event is missed
+            safetyTimeoutRunnable?.let { handler.removeCallbacks(it) }
+            safetyTimeoutRunnable = Runnable {
+                if (serviceStarted) {
+                    Log.w(TAG, "SAFETY TIMEOUT: Service running > 30s, forcing stop")
+                    serviceStarted = false
+                    currentServiceNumber = null
+                    isStartingService.set(false)
+                    try {
+                        context.stopService(Intent(context, CallerIdService::class.java))
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error in safety timeout stop: ${e.message}")
+                    }
+                }
+            }
+            handler.postDelayed(safetyTimeoutRunnable!!, SERVICE_SAFETY_TIMEOUT_MS)
+            
         } catch (e: Exception) {
             Log.e(TAG, "Error starting service: ${e.message}")
             isStartingService.set(false)
@@ -197,8 +228,16 @@ class CallReceiver : BroadcastReceiver() {
 
     private fun stopCallerIdService(context: Context) {
         try {
-            context.stopService(Intent(context, CallerIdService::class.java))
-            Log.d(TAG, "CallerIdService stopped")
+            val intent = Intent(context, CallerIdService::class.java)
+            // Try stopService multiple times to ensure it stops
+            val stopped = context.stopService(intent)
+            Log.d(TAG, "CallerIdService stopService result: $stopped")
+            
+            // Also send explicit STOP action in case service needs to clean up
+            if (!stopped) {
+                Log.w(TAG, "First stopService returned false, trying again...")
+                context.stopService(intent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping service: ${e.message}")
         }
