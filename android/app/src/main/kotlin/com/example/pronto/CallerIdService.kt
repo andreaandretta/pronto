@@ -212,11 +212,13 @@ class CallerIdService : Service() {
                         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
                 PixelFormat.TRANSLUCENT
             )
-            // Position at top center of screen
+            // Position at top center of screen, BELOW native call notification
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             // Use dp for consistent positioning across screen densities
             val density = resources.displayMetrics.density
-            params.y = (60 * density).toInt()  // 60dp from top
+            // Position below native Android call notification (which occupies ~200-250dp)
+            // 280dp ensures PRONTO card doesn't block native answer/reject buttons
+            params.y = (280 * density).toInt()  // 280dp from top - below native call UI
 
             // Initialize WebView on main thread with try-catch
             initWebViewSafely(params)
