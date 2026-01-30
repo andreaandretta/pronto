@@ -16,7 +16,7 @@ class CallReceiver : BroadcastReceiver() {
         private const val TAG = "CallReceiver"
         private const val DEBOUNCE_MS = 500L
         private const val PRIVATE_NUMBER_DELAY_MS = 1500L // Wait 1.5s for real number
-        private const val SERVICE_SAFETY_TIMEOUT_MS = 30_000L // 30 second safety timeout
+        private const val SERVICE_SAFETY_TIMEOUT_MS = 8_000L // Fix Kimi: 8s sufficiente (era 30s)
         
         // Race condition prevention: atomic flag for service start
         private val isStartingService = AtomicBoolean(false)

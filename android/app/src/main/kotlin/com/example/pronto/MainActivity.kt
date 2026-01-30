@@ -544,6 +544,7 @@ class MainActivity : AppCompatActivity() {
                 updatePermissionStatus()
             }
             BATTERY_OPTIMIZATION_REQUEST_CODE -> {
+                // Fix Kimi: Check battery optimization status and update UI
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                     if (pm.isIgnoringBatteryOptimizations(packageName)) {
@@ -551,7 +552,8 @@ class MainActivity : AppCompatActivity() {
                         // Continue wizard
                         startPermissionWizard()
                     } else {
-                        Toast.makeText(this, "⚠️ L'ottimizzazione è ancora attiva", Toast.LENGTH_LONG).show()
+                        // Fix Kimi: More specific message to guide user
+                        Toast.makeText(this, "⚠️ Devi ancora disattivare l'ottimizzazione per PRONTO nelle impostazioni", Toast.LENGTH_LONG).show()
                     }
                 }
                 updatePermissionStatus()

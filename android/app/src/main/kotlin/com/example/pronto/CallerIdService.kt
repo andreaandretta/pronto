@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -14,6 +16,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.telecom.TelecomManager
+import android.telephony.TelephonyManager
 import android.view.Gravity
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -47,6 +50,12 @@ class CallerIdService : Service() {
         android.util.Log.w("CallerIdService", "Auto-dismissing overlay after timeout")
         closeOverlay()
     }
+    
+    // Fix Kimi: Call state polling to detect IDLE faster
+    private var callStatePoller: Runnable? = null
+    
+    // Fix Kimi: Network callback reference for cleanup
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     
     // Sanitize phone number input
     private fun sanitizePhoneNumber(input: String?): String {
@@ -144,7 +153,58 @@ class CallerIdService : Service() {
         // Schedule auto-dismiss for battery protection
         handler.postDelayed(autoDismissRunnable, AUTO_DISMISS_TIMEOUT)
         
+        // Fix Kimi: Start call state polling to detect IDLE faster (every 1s after 2s delay)
+        startCallStatePolling()
+        
+        // Fix Kimi: Register network callback to close overlay on network loss
+        registerNetworkCallback()
+        
         return START_NOT_STICKY
+    }
+    
+    // Fix Kimi: Poll call state every second to detect IDLE
+    private fun startCallStatePolling() {
+        callStatePoller = object : Runnable {
+            override fun run() {
+                try {
+                    val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                    @Suppress("DEPRECATION")
+                    val callState = telephonyManager.callState
+                    
+                    if (callState == TelephonyManager.CALL_STATE_IDLE) {
+                        android.util.Log.d("CallerIdService", "Poller detected IDLE - closing overlay")
+                        closeOverlay()
+                    } else {
+                        // Still in call, check again in 1s
+                        handler.postDelayed(this, 1000)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CallerIdService", "Error in call state poller: ${e.message}")
+                    // On error, close overlay to be safe
+                    closeOverlay()
+                }
+            }
+        }
+        // Start polling after 2s delay
+        handler.postDelayed(callStatePoller!!, 2000)
+        android.util.Log.d("CallerIdService", "Call state polling started (2s delay, then 1s interval)")
+    }
+    
+    // Fix Kimi: Register network callback to close overlay on network loss
+    private fun registerNetworkCallback() {
+        try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onLost(network: Network) {
+                    android.util.Log.w("CallerIdService", "Network lost - forcing overlay close")
+                    handler.post { closeOverlay() }
+                }
+            }
+            connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+            android.util.Log.d("CallerIdService", "Network callback registered")
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Failed to register network callback: ${e.message}")
+        }
     }
     
     private fun updatePhoneNumber(newNumber: String) {
@@ -791,6 +851,24 @@ class CallerIdService : Service() {
         
         // Cancel auto-dismiss timer
         handler.removeCallbacks(autoDismissRunnable)
+        
+        // Fix Kimi: Cancel call state polling
+        callStatePoller?.let { handler.removeCallbacks(it) }
+        callStatePoller = null
+        
+        // Fix Kimi: Unregister network callback
+        networkCallback?.let { callback ->
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(callback)
+                android.util.Log.d("CallerIdService", "Network callback unregistered")
+            } catch (e: Exception) {
+                android.util.Log.e("CallerIdService", "Error unregistering network callback: ${e.message}")
+            }
+        }
+        networkCallback = null
+        
+        // Remove all pending callbacks
         handler.removeCallbacksAndMessages(null)
         
         // Release WakeLock to save battery
