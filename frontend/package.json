@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "build:android": "vite build && rm -rf ../android/app/src/main/assets/www && mkdir -p ../android/app/src/main/assets/www && cp -r dist/* ../android/app/src/main/assets/www/ && sed -i 's/ crossorigin//g' ../android/app/src/main/assets/www/index.html && echo '✅ Assets copiati e crossorigin rimosso!'",
+    "postbuild:android": "cat ../android/app/src/main/assets/www/index.html | grep -E '(script|link)' | head -5"
   },
   "dependencies": {
     "react": "^18.2.0",

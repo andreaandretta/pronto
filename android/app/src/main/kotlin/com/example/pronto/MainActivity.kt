@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
@@ -20,6 +21,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
         private const val OVERLAY_PERMISSION_REQUEST_CODE = 101
+        private const val BATTERY_OPTIMIZATION_REQUEST_CODE = 102
     }
 
     private val requiredPermissions = mutableListOf(
@@ -127,6 +129,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkAndRequestPermissions() {
+        // Check Battery Optimization (richiesto per Android 6+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                requestBatteryOptimizationExemption()
+                return
+            }
+        }
+
         // Check overlay permission
         if (!Settings.canDrawOverlays(this)) {
             requestOverlayPermission()
@@ -149,6 +160,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            try {
+                startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE)
+                Toast.makeText(this, "Disabilita l'ottimizzazione batteria per PRONTO", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                // Fallback: apri settings manualmente
+                val fallbackIntent = Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
+                startActivity(fallbackIntent)
+            }
+        }
+    }
+
     private fun requestOverlayPermission() {
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -159,12 +186,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == OVERLAY_PERMISSION_REQUEST_CODE) {
-            if (Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "✅ Permesso overlay OK!", Toast.LENGTH_SHORT).show()
+        when (requestCode) {
+            OVERLAY_PERMISSION_REQUEST_CODE -> {
+                if (Settings.canDrawOverlays(this)) {
+                    Toast.makeText(this, "✅ Permesso overlay OK!", Toast.LENGTH_SHORT).show()
+                    checkAndRequestPermissions()
+                } else {
+                    Toast.makeText(this, "❌ Permesso overlay necessario!", Toast.LENGTH_LONG).show()
+                }
+            }
+            BATTERY_OPTIMIZATION_REQUEST_CODE -> {
+                // Ricontrolla i permessi dopo la richiesta
                 checkAndRequestPermissions()
-            } else {
-                Toast.makeText(this, "❌ Permesso overlay necessario!", Toast.LENGTH_LONG).show()
             }
         }
     }

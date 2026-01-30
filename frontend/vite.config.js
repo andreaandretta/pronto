@@ -25,6 +25,18 @@ export default defineConfig({
           return `assets/[name]-[hash][extname]`
         }
       }
+    },
+    // CRITICO: Non aggiungere crossorigin agli script per compatibilità WebView
+    modulePreload: {
+      polyfill: false
+    },
+    // Disabilita crossorigin per assets
+    cssCodeSplit: true,
+  },
+  // Rimuove crossorigin dagli script generati
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      return { relative: true }
     }
   },
   server: {

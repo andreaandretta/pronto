@@ -22,12 +22,15 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 
 class CallerIdService : Service() {
     private var webView: WebView? = null
     private var windowManager: WindowManager? = null
     private var incomingNumber: String = ""
     private val handler = Handler(Looper.getMainLooper())
+    private var reactReady: Boolean = false
+    private var pendingNumber: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -39,6 +42,8 @@ class CallerIdService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         incomingNumber = intent?.getStringExtra("phone_number") ?: ""
+        reactReady = false
+        pendingNumber = incomingNumber
         android.util.Log.d("CallerIdService", "Starting overlay for number: $incomingNumber")
         showOverlay()
         return START_NOT_STICKY
@@ -96,24 +101,8 @@ class CallerIdService : Service() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     android.util.Log.d("CallerIdService", "Page loaded: $url")
-                    val escapedNumber = incomingNumber.replace("'", "\\'")
-                    view?.evaluateJavascript(
-                        """
-                        (function() {
-                            console.log('PRONTO: Page finished loading');
-                            if(window.setPhoneNumber) {
-                                window.setPhoneNumber('$escapedNumber');
-                                return 'setPhoneNumber called successfully';
-                            } else {
-                                console.error('PRONTO: setPhoneNumber not found!');
-                                return 'setPhoneNumber NOT FOUND';
-                            }
-                        })();
-                        """.trimIndent(),
-                        { result ->
-                            android.util.Log.d("CallerIdService", "JS Result: $result")
-                        }
-                    )
+                    // NON inviare subito il numero - aspetta handshake da React
+                    // Il numero verrà inviato quando onReactReady() viene chiamato
                 }
                 
                 override fun onReceivedError(
@@ -154,24 +143,60 @@ class CallerIdService : Service() {
     private fun loadMainContent() {
         val assetPath = "file:///android_asset/www/index.html"
         android.util.Log.d("CallerIdService", "Loading URL: $assetPath")
-        webView?.loadUrl(assetPath)
         
-        // Fallback: se dopo 3 secondi la pagina non è caricata, prova HTML inline
+        // Verifica che il file esista prima di caricarlo
+        try {
+            assets.open("www/index.html").close()
+            android.util.Log.d("CallerIdService", "Asset file exists, loading...")
+            webView?.loadUrl(assetPath)
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Asset file not found: ${e.message}")
+            loadFallbackHtml()
+            return
+        }
+        
+        // Fallback: se dopo 8 secondi React non segnala ready, usa fallback
         handler.postDelayed({
-            webView?.evaluateJavascript(
-                "(function() { return document.readyState; })();",
-                { result ->
-                    android.util.Log.d("CallerIdService", "Document readyState: $result")
-                    if (result == null || result == "null" || result.contains("loading")) {
-                        android.util.Log.w("CallerIdService", "Page may not be loaded properly, using fallback")
-                        // Non usiamo il fallback immediatamente per evitare flash
-                    }
+            if (!reactReady) {
+                android.util.Log.w("CallerIdService", "React not ready after 8s, using fallback")
+                loadFallbackHtml()
+            }
+        }, 8000)
+    }
+
+    private fun sendPhoneNumberToReact() {
+        val number = pendingNumber ?: return
+        // Usa JSONObject.quote per escaping sicuro contro XSS
+        val safeNumber = JSONObject.quote(number)
+        
+        webView?.evaluateJavascript(
+            """
+            (function() {
+                console.log('PRONTO: Received phone number from Android');
+                if (window.setPhoneNumber && typeof window.setPhoneNumber === 'function') {
+                    window.setPhoneNumber($safeNumber);
+                    return 'Number sent to React: ' + $safeNumber;
+                } else {
+                    console.error('PRONTO: setPhoneNumber not found!');
+                    return 'ERROR: setPhoneNumber not found';
                 }
-            )
-        }, 3000)
+            })();
+            """.trimIndent(),
+            { result ->
+                android.util.Log.d("CallerIdService", "JS Result: $result")
+            }
+        )
     }
 
     private fun loadFallbackHtml() {
+        // Sanitizza il numero per il fallback HTML
+        val safeNumber = incomingNumber
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#x27;")
+        
         val fallbackHtml = """
         <!DOCTYPE html>
         <html>
@@ -247,7 +272,7 @@ class CallerIdService : Service() {
                 <div class="avatar">📞</div>
                 <p>Chiamata in arrivo</p>
                 <h1 id="callerName">Numero Sconosciuto</h1>
-                <p class="number" id="phoneNumber">$incomingNumber</p>
+                <p class="number" id="phoneNumber">$safeNumber</p>
             </div>
             <div class="content">
                 <button class="btn btn-whatsapp" onclick="action('WHATSAPP')">
@@ -258,7 +283,7 @@ class CallerIdService : Service() {
                         📞 Rispondi
                     </button>
                     <button class="btn btn-reject" onclick="action('REJECT')">
-                        🛏️ Rifiuta
+                        📵 Rifiuta
                     </button>
                 </div>
                 <button class="btn btn-close" onclick="action('CLOSE')">Chiudi</button>
@@ -308,6 +333,15 @@ class CallerIdService : Service() {
         fun log(message: String) {
             android.util.Log.d("WebViewJS", message)
         }
+        
+        @JavascriptInterface
+        fun onReactReady() {
+            android.util.Log.d("CallerIdService", "React reported ready, sending phone number")
+            reactReady = true
+            handler.post {
+                sendPhoneNumberToReact()
+            }
+        }
     }
 
     private fun openWhatsApp() {
@@ -345,16 +379,33 @@ class CallerIdService : Service() {
     }
 
     private fun closeOverlay() {
-        android.util.Log.d("CallerIdService", "Closing overlay")
+        android.util.Log.d("CallerIdService", "Closing overlay and destroying WebView")
         handler.removeCallbacksAndMessages(null)
-        webView?.let { 
+        
+        webView?.let { wv ->
             try {
-                windowManager?.removeView(it) 
+                // Rimuovi dal WindowManager
+                windowManager?.removeView(wv)
+                
+                // Pulizia completa WebView per evitare memory leak
+                wv.stopLoading()
+                wv.loadUrl("about:blank")
+                wv.clearHistory()
+                wv.removeAllViews()
+                wv.clearCache(true)
+                
+                // Distruggi il WebView
+                wv.destroy()
+                
+                android.util.Log.d("CallerIdService", "WebView destroyed successfully")
             } catch (e: Exception) {
-                android.util.Log.e("CallerIdService", "Error removing view: ${e.message}")
+                android.util.Log.e("CallerIdService", "Error destroying WebView: ${e.message}")
             }
         }
+        
         webView = null
+        reactReady = false
+        pendingNumber = null
         stopSelf()
     }
 

@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function App() {
   const [phoneNumber, setPhoneNumber] = useState('+39 333 1234567')
   const [callerName, setCallerName] = useState('Numero Sconosciuto')
   const [isReady, setIsReady] = useState(false)
+  const reactReadySent = useRef(false)
 
   useEffect(() => {
-    console.log('PRONTO: App mounted')
+    console.log('PRONTO: App mounted, setting up bridge...')
     
     // Leggi il numero dal parametro URL (passato dall'Android)
     const urlParams = new URLSearchParams(window.location.search)
@@ -42,14 +43,35 @@ export default function App() {
       }
     }
     
-    // Segna come pronto e nascondi loading
-    setIsReady(true)
-    if (window.hideLoading) {
-      setTimeout(() => window.hideLoading(), 100)
-    }
-    
-    return () => {
-      console.log('PRONTO: App unmounting')
+    // Segnala a Kotlin che React è pronto (HANDSHAKE)
+    // Usa un ref per evitare invii multipli
+    if (!reactReadySent.current) {
+      reactReadySent.current = true
+      
+      // Piccolo delay per assicurarsi che tutto sia renderizzato
+      const timer = setTimeout(() => {
+        if (window.Android && window.Android.onReactReady) {
+          try {
+            window.Android.onReactReady()
+            console.log('PRONTO: Sent onReactReady to Android')
+          } catch (e) {
+            console.error('PRONTO: Error sending onReactReady:', e)
+          }
+        } else {
+          console.log('PRONTO: Android bridge not available (browser mode)')
+        }
+        
+        // Segna come pronto e nascondi loading
+        setIsReady(true)
+        if (window.hideLoading) {
+          window.hideLoading()
+        }
+      }, 100)
+      
+      return () => {
+        clearTimeout(timer)
+        console.log('PRONTO: App unmounting')
+      }
     }
   }, [])
 
