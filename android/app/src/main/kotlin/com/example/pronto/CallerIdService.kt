@@ -42,7 +42,7 @@ class CallerIdService : Service() {
     private val isOverlayActive = AtomicBoolean(false)
     
     // Auto-dismiss timer for battery/memory protection
-    private val AUTO_DISMISS_TIMEOUT = 60_000L // 60 seconds
+    private val AUTO_DISMISS_TIMEOUT = 15_000L // 15 seconds (reduced from 60s)
     private val autoDismissRunnable = Runnable {
         android.util.Log.w("CallerIdService", "Auto-dismissing overlay after timeout")
         closeOverlay()
@@ -171,7 +171,9 @@ class CallerIdService : Service() {
             )
             // Position at top center of screen
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            params.y = 50  // 50px from top
+            // Use dp for consistent positioning across screen densities
+            val density = resources.displayMetrics.density
+            params.y = (60 * density).toInt()  // 60dp from top
 
             // Initialize WebView on main thread with try-catch
             initWebViewSafely(params)
@@ -606,7 +608,8 @@ class CallerIdService : Service() {
                 e.printStackTrace()
             }
         }
-        closeOverlay()
+        // Delay overlay close so user can see caller info briefly
+        handler.postDelayed({ closeOverlay() }, 2000)  // 2 seconds delay
     }
 
     private fun rejectCall() {
