@@ -19,9 +19,30 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
     
     companion object {
+        private const val TAG = "PRonto"
         private const val PERMISSION_REQUEST_CODE = 100
         private const val OVERLAY_PERMISSION_REQUEST_CODE = 101
         private const val BATTERY_OPTIMIZATION_REQUEST_CODE = 102
+    }
+    
+    /**
+     * Verifica esplicita che tutti i permessi critici siano stati concessi.
+     * Usare per debug e logging prima di operazioni critiche.
+     */
+    fun checkAllPermissions(): Boolean {
+        val phonePermission = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE)
+        val callLogPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG)
+        val overlayPermission = Settings.canDrawOverlays(this)
+        
+        android.util.Log.d(TAG, "Permission check:")
+        android.util.Log.d(TAG, "  READ_PHONE_STATE: ${if (phonePermission == PackageManager.PERMISSION_GRANTED) "GRANTED" else "DENIED"}")
+        android.util.Log.d(TAG, "  READ_CALL_LOG: ${if (callLogPermission == PackageManager.PERMISSION_GRANTED) "GRANTED" else "DENIED"}")
+        android.util.Log.d(TAG, "  SYSTEM_ALERT_WINDOW (Overlay): ${if (overlayPermission) "GRANTED" else "DENIED"}")
+        
+        val allGranted = phonePermission == PackageManager.PERMISSION_GRANTED && overlayPermission
+        android.util.Log.d(TAG, "  All critical permissions OK: $allGranted")
+        
+        return allGranted
     }
 
     private val requiredPermissions = mutableListOf(
@@ -109,23 +130,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun testOverlay() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Abilita permesso overlay!", Toast.LENGTH_LONG).show()
-            requestOverlayPermission()
-            return
+        try {
+            android.util.Log.d(TAG, "testOverlay() called")
+            
+            // Check all permissions first with logging
+            if (!checkAllPermissions()) {
+                android.util.Log.e(TAG, "Missing required permissions for overlay test")
+            }
+            
+            if (!Settings.canDrawOverlays(this)) {
+                android.util.Log.e(TAG, "SYSTEM_ALERT_WINDOW permission not granted")
+                Toast.makeText(this, "Abilita permesso overlay!", Toast.LENGTH_LONG).show()
+                requestOverlayPermission()
+                return
+            }
+            
+            val intent = Intent(this, CallerIdService::class.java).apply {
+                putExtra("phone_number", "+39 333 1234567")
+            }
+            
+            android.util.Log.d(TAG, "Starting CallerIdService with test number")
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            
+            android.util.Log.d(TAG, "CallerIdService started successfully")
+            Toast.makeText(this, "Overlay test avviato!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "CRASH in testOverlay: ${e.message}")
+            e.printStackTrace()
+            Toast.makeText(this, "Errore: ${e.message}", Toast.LENGTH_LONG).show()
         }
-        
-        val intent = Intent(this, CallerIdService::class.java).apply {
-            putExtra("phone_number", "+39 333 1234567")
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        
-        Toast.makeText(this, "Overlay test avviato!", Toast.LENGTH_SHORT).show()
     }
 
     private fun checkAndRequestPermissions() {

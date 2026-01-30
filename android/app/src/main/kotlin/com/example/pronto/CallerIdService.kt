@@ -60,7 +60,41 @@ class CallerIdService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(1, createNotification())
+        startForegroundSafely()
+    }
+    
+    /**
+     * Start foreground service with fallback for Android 14+ SecurityException.
+     * On API 34+, phoneCall foreground service type is restricted to system dialers.
+     * We use specialUse type instead, with try-catch as safety net.
+     */
+    private fun startForegroundSafely() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+ (API 34): Use ServiceInfo constant for specialUse
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+                android.util.Log.d("CallerIdService", "Started foreground with SPECIAL_USE type (API 34+)")
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+                android.util.Log.d("CallerIdService", "Started foreground service")
+            }
+        } catch (e: SecurityException) {
+            android.util.Log.e("CallerIdService", "SecurityException in startForeground: ${e.message}")
+            android.util.Log.w("CallerIdService", "Continuing without foreground - overlay may still work")
+            // Don't crash - the overlay can still work via SYSTEM_ALERT_WINDOW permission
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Error starting foreground: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    companion object {
+        private const val NOTIFICATION_ID = 1
+        private const val CHANNEL_ID = "caller_id_channel"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -99,21 +133,60 @@ class CallerIdService : Service() {
     }
 
     private fun showOverlay() {
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        try {
+            // Verify phone number is not blank
+            if (incomingNumber.isBlank()) {
+                android.util.Log.e("CallerIdService", "Empty phone number, using default")
+                incomingNumber = "Numero Privato"
+            }
+            
+            // Verify overlay permission
+            if (!android.provider.Settings.canDrawOverlays(this)) {
+                android.util.Log.e("CallerIdService", "CRASH PREVENTED: Missing SYSTEM_ALERT_WINDOW permission")
+                isOverlayActive.set(false)
+                stopSelf()
+                return
+            }
+            
+            windowManager = getSystemService(WINDOW_SERVICE) as? WindowManager
+            if (windowManager == null) {
+                android.util.Log.e("CallerIdService", "CRASH PREVENTED: WindowManager is null")
+                isOverlayActive.set(false)
+                stopSelf()
+                return
+            }
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.CENTER
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+                PixelFormat.TRANSLUCENT
+            )
+            params.gravity = Gravity.CENTER
 
-        webView = WebView(this).apply {
+            // Initialize WebView on main thread with try-catch
+            initWebViewSafely(params)
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "CRASH in showOverlay: ${e.message}")
+            e.printStackTrace()
+            isOverlayActive.set(false)
+            stopSelf()
+        }
+    }
+    
+    private fun initWebViewSafely(params: WindowManager.LayoutParams) {
+        try {
+            // Ensure we're on the main thread
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                handler.post { initWebViewSafely(params) }
+                return
+            }
+            
+            webView = WebView(this).apply {
             // Configurazione WebView estesa
             settings.apply {
                 javaScriptEnabled = true
@@ -181,11 +254,28 @@ class CallerIdService : Service() {
             loadMainContent()
         }
 
+        // Verify WebView was created successfully
+        if (webView == null) {
+            android.util.Log.e("CallerIdService", "CRASH PREVENTED: WebView is null after init")
+            isOverlayActive.set(false)
+            stopSelf()
+            return
+        }
+
         try {
             windowManager?.addView(webView, params)
             android.util.Log.d("CallerIdService", "Overlay added to window manager")
         } catch (e: Exception) {
             android.util.Log.e("CallerIdService", "Error adding overlay: ${e.message}")
+            e.printStackTrace()
+            isOverlayActive.set(false)
+            stopSelf()
+        }
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "CRASH in initWebViewSafely: ${e.message}")
+            e.printStackTrace()
+            isOverlayActive.set(false)
+            stopSelf()
         }
     }
 
@@ -485,7 +575,7 @@ class CallerIdService : Service() {
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            "caller_id_channel",
+            CHANNEL_ID,
             "Caller ID",
             NotificationManager.IMPORTANCE_LOW
         )
@@ -494,7 +584,7 @@ class CallerIdService : Service() {
     }
 
     private fun createNotification(): Notification {
-        return NotificationCompat.Builder(this, "caller_id_channel")
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("PRONTO")
             .setContentText("Servizio Caller ID attivo")
             .setSmallIcon(android.R.drawable.ic_menu_call)

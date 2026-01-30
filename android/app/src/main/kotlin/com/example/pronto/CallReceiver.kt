@@ -28,12 +28,30 @@ class CallReceiver : BroadcastReceiver() {
         return input.replace(Regex("[^0-9+\\s\\-()]"), "").take(20)
     }
 
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == TelephonyManager.ACTION_PHONE_STATE_CHANGED) {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        try {
+            Log.d(TAG, "onReceive triggered")
+            
+            // Null-safety checks
+            if (context == null) {
+                Log.e(TAG, "CRASH PREVENTED: context is null")
+                return
+            }
+            
+            if (intent == null) {
+                Log.e(TAG, "CRASH PREVENTED: intent is null")
+                return
+            }
+            
+            if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) {
+                Log.d(TAG, "Ignoring action: ${intent.action}")
+                return
+            }
+            
             val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
             val phoneNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
             
-            Log.d(TAG, "Phone state: $state, number: $phoneNumber")
+            Log.d(TAG, "State: $state, Number: $phoneNumber")
             
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
@@ -45,6 +63,11 @@ class CallReceiver : BroadcastReceiver() {
                     }
                     lastRingingTime = now
                     
+                    // Null-safety for phone number
+                    if (phoneNumber.isNullOrEmpty()) {
+                        Log.w(TAG, "Number is null/empty, using 'Numero Privato'")
+                    }
+                    
                     val sanitizedNumber = sanitizePhoneNumber(phoneNumber)
                     Log.d(TAG, "Incoming call from: $sanitizedNumber")
                     startCallerIdService(context, sanitizedNumber)
@@ -55,7 +78,15 @@ class CallReceiver : BroadcastReceiver() {
                     isStartingService.set(false) // Reset atomic flag
                     stopCallerIdService(context)
                 }
+                else -> {
+                    Log.d(TAG, "Unknown state: $state")
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "CRASH in onReceive: ${e.message}")
+            e.printStackTrace()
+            // Reset flags on crash to prevent stuck state
+            isStartingService.set(false)
         }
     }
 
