@@ -549,26 +549,62 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showBatteryDialog() {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val isSamsung = manufacturer.contains("samsung")
+        
+        val message = if (isSamsung) {
+            "Per funzionare correttamente, PRONTO deve ignorare le ottimizzazioni batteria.\n\n" +
+            "Su Samsung:\n" +
+            "1. Tappa 'Disattiva Ottimizzazione'\n" +
+            "2. Se non funziona, vai in Impostazioni > Manutenzione dispositivo > Batteria\n" +
+            "3. Cerca PRONTO e seleziona 'Non controllata'\n\n" +
+            "⚠️ Se premi 'Non ora', l'app potrebbe non funzionare in background."
+        } else {
+            "Per funzionare quando il telefono è in standby, PRONTO deve ignorare le ottimizzazioni batteria.\n\n" +
+            "1. Tappa 'Disattiva Ottimizzazione'\n" +
+            "2. Nella schermata che si apre, seleziona 'Consenti'\n\n" +
+            "⚠️ Se premi 'Non ora', l'app potrebbe non funzionare durante le chiamate."
+        }
+        
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Ottimizzazione Batteria")
-            .setMessage("Per funzionare quando il telefono è in standby, PRONTO deve ignorare le ottimizzazioni batteria.\n\nAltrimenti Android potrebbe chiudere l'app durante le chiamate.")
+            .setTitle("⚠️ Ottimizzazione Batteria Richiesta")
+            .setMessage(message)
             .setPositiveButton("Disattiva Ottimizzazione") { _, _ ->
                 requestBatteryOptimizationExemption()
             }
-            .setNegativeButton("Dopo", null)
+            .setNegativeButton("Non ora") { _, _ ->
+                Toast.makeText(this, "⚠️ Ricorda: l'app potrebbe essere chiusa da Android", Toast.LENGTH_LONG).show()
+            }
+            .setCancelable(false)
             .show()
     }
     
     private fun requestBatteryOptimizationExemption() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
+                // Primary method: Request to ignore battery optimizations (works on stock Android)
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:$packageName")
                 }
                 startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE)
             } catch (e: Exception) {
-                val fallbackIntent = Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)
-                startActivity(fallbackIntent)
+                android.util.Log.w(TAG, "Primary battery intent failed: ${e.message}")
+                
+                // Fallback 1: Try direct app settings (works on most devices including Samsung)
+                try {
+                    val appSettingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(appSettingsIntent)
+                    Toast.makeText(this, "⚠️ Cerca 'Batteria' nelle impostazioni app e seleziona 'Non ottimizzare'", Toast.LENGTH_LONG).show()
+                } catch (e2: Exception) {
+                    android.util.Log.e(TAG, "App settings intent also failed: ${e2.message}")
+                    
+                    // Fallback 2: Open device settings (last resort)
+                    val settingsIntent = Intent(Settings.ACTION_SETTINGS)
+                    startActivity(settingsIntent)
+                    Toast.makeText(this, "⚠️ Vai in Impostazioni > App > PRONTO > Batteria > Non ottimizzare", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
