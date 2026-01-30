@@ -19,6 +19,10 @@ class CallReceiver : BroadcastReceiver() {
         // Race condition prevention: atomic flag for service start
         private val isStartingService = AtomicBoolean(false)
         private var lastRingingTime = 0L
+        
+        // BUG FIX: Track if we're waiting for real number after null first event
+        private var pendingPrivateNumber = false
+        private var serviceStarted = false
     }
     
     // Sanitize phone number to prevent injection
@@ -55,18 +59,39 @@ class CallReceiver : BroadcastReceiver() {
             
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
-                    // Debounce: prevent duplicate RINGING broadcasts
+                    // BUG FIX: Android sends RINGING twice:
+                    // 1st event: number=null (broadcast before number is known)
+                    // 2nd event: number=real (after system resolves the number)
+                    // We must WAIT for the real number, not show "Numero Privato" immediately
+                    
+                    if (phoneNumber.isNullOrEmpty()) {
+                        Log.d(TAG, "RINGING with null number - waiting for second event with real number")
+                        // Don't start service yet - wait for the event with the actual number
+                        // Schedule a delayed start in case the second event never comes (truly private number)
+                        if (!pendingPrivateNumber) {
+                            pendingPrivateNumber = true
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                if (pendingPrivateNumber && !serviceStarted) {
+                                    Log.d(TAG, "No real number received after delay - truly private number")
+                                    pendingPrivateNumber = false
+                                    startCallerIdService(context, "Numero Privato")
+                                }
+                            }, 800) // Wait 800ms for real number
+                        }
+                        return
+                    }
+                    
+                    // We have a real number! Cancel pending private number timer
+                    pendingPrivateNumber = false
+                    serviceStarted = true
+                    
+                    // Debounce: prevent duplicate RINGING with same number
                     val now = System.currentTimeMillis()
                     if (now - lastRingingTime < DEBOUNCE_MS) {
-                        Log.d(TAG, "Debounced duplicate RINGING event")
+                        Log.d(TAG, "Debounced duplicate RINGING event with number")
                         return
                     }
                     lastRingingTime = now
-                    
-                    // Null-safety for phone number
-                    if (phoneNumber.isNullOrEmpty()) {
-                        Log.w(TAG, "Number is null/empty, using 'Numero Privato'")
-                    }
                     
                     val sanitizedNumber = sanitizePhoneNumber(phoneNumber)
                     Log.d(TAG, "Incoming call from: $sanitizedNumber")
@@ -76,6 +101,8 @@ class CallReceiver : BroadcastReceiver() {
                 TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                     Log.d(TAG, "Call ended or answered")
                     isStartingService.set(false) // Reset atomic flag
+                    pendingPrivateNumber = false  // Reset pending flag
+                    serviceStarted = false        // Reset started flag
                     stopCallerIdService(context)
                 }
                 else -> {

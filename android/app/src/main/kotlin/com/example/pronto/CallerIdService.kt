@@ -518,8 +518,25 @@ class CallerIdService : Service() {
             
             function openWhatsApp() {
                 console.log('WhatsApp button clicked, phone:', currentPhone);
+                // Use Android bridge for proper number handling
                 if (window.Android && window.Android.performAction) {
                     window.Android.performAction('WHATSAPP');
+                } else {
+                    // Fallback: clean number in JS and open directly
+                    var num = currentPhone || '';
+                    // Remove spaces, dashes, parentheses, +
+                    num = num.replace(/[\s\-\(\)\+]/g, '');
+                    // Handle Italian prefixes
+                    if (num.startsWith('0039')) num = num.substring(2);
+                    else if (num.startsWith('39') && num.length > 9) { /* keep */ }
+                    else if (num.startsWith('3') && num.length >= 9) num = '39' + num;
+                    else if (num.startsWith('0') && num.length >= 9) num = '39' + num.substring(1);
+                    
+                    var url = (num.length >= 10 && !num.includes('Privato')) 
+                        ? 'https://wa.me/' + num 
+                        : 'https://wa.me/';
+                    console.log('Opening WhatsApp URL:', url);
+                    window.location.href = url;
                 }
             }
             
@@ -611,13 +628,46 @@ class CallerIdService : Service() {
     }
 
     private fun openWhatsApp() {
-        val cleanNumber = incomingNumber.replace(Regex("[^0-9+]"), "")
-        android.util.Log.d("CallerIdService", "Opening WhatsApp for number: '$cleanNumber' (original: '$incomingNumber')")
+        // BUG FIX: Clean number completely for wa.me format
+        // wa.me requires: country code + number, no spaces, no +, no dashes
+        var cleanNumber = incomingNumber
+            .replace(" ", "")      // Remove spaces
+            .replace("-", "")      // Remove dashes
+            .replace("(", "")      // Remove parentheses
+            .replace(")", "")
+            .replace("+", "")      // Remove + (we'll add country code properly)
+        
+        android.util.Log.d("CallerIdService", "Cleaning number: '$incomingNumber' -> '$cleanNumber'")
+        
+        // Handle Italian prefixes
+        if (cleanNumber.startsWith("39") && cleanNumber.length > 9) {
+            // Already has 39 prefix, keep it
+            android.util.Log.d("CallerIdService", "Number already has 39 prefix")
+        } else if (cleanNumber.startsWith("0039")) {
+            // Remove 00 international prefix, keep 39
+            cleanNumber = cleanNumber.substring(2)
+            android.util.Log.d("CallerIdService", "Removed 00 prefix: $cleanNumber")
+        } else if (cleanNumber.startsWith("3") && cleanNumber.length >= 9) {
+            // Italian mobile without country code (3xx xxx xxxx) - add 39
+            cleanNumber = "39$cleanNumber"
+            android.util.Log.d("CallerIdService", "Added 39 prefix: $cleanNumber")
+        } else if (cleanNumber.startsWith("0") && cleanNumber.length >= 9) {
+            // Italian landline (0xx xxx xxxx) - remove leading 0, add 39
+            cleanNumber = "39${cleanNumber.substring(1)}"
+            android.util.Log.d("CallerIdService", "Converted landline: $cleanNumber")
+        }
+        
+        android.util.Log.d("CallerIdService", "Final WhatsApp number: '$cleanNumber' (original: '$incomingNumber')")
         
         try {
-            // Check if number is empty or private
-            if (cleanNumber.isBlank() || cleanNumber.length < 5) {
-                android.util.Log.d("CallerIdService", "Number is empty/too short, opening WhatsApp main app")
+            // Check if number is empty, private, or too short
+            val isValidNumber = cleanNumber.isNotBlank() && 
+                                cleanNumber.length >= 10 && 
+                                !cleanNumber.contains("Privato", ignoreCase = true) &&
+                                !cleanNumber.contains("Sconosciuto", ignoreCase = true)
+            
+            if (!isValidNumber) {
+                android.util.Log.d("CallerIdService", "Number is invalid/private, opening WhatsApp main app")
                 // Open WhatsApp main app instead of specific chat
                 val intent = Intent(Intent.ACTION_MAIN).apply {
                     setPackage("com.whatsapp")
@@ -634,11 +684,10 @@ class CallerIdService : Service() {
                     startActivity(browserIntent)
                 }
             } else {
-                // Remove + prefix for wa.me format (some phones need this)
-                val waNumber = if (cleanNumber.startsWith("+")) cleanNumber.substring(1) else cleanNumber
-                android.util.Log.d("CallerIdService", "Opening wa.me/$waNumber")
+                // Valid number - open wa.me with cleaned number
+                android.util.Log.d("CallerIdService", "Opening wa.me/$cleanNumber")
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = Uri.parse("https://wa.me/$waNumber")
+                    data = Uri.parse("https://wa.me/$cleanNumber")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(intent)
