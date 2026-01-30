@@ -49,6 +49,14 @@ class CallReceiver : BroadcastReceiver() {
                 return
             }
             
+            // Check if PRONTO is enabled in settings
+            val prefs = context.getSharedPreferences("pronto_settings", Context.MODE_PRIVATE)
+            val isEnabled = prefs.getBoolean("enabled", true)
+            if (!isEnabled) {
+                Log.d(TAG, "PRONTO is disabled - ignoring call event")
+                return
+            }
+            
             if (intent == null) {
                 Log.e(TAG, "CRASH PREVENTED: intent is null")
                 return
