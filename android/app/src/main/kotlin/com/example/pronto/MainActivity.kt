@@ -15,6 +15,8 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,6 +43,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var notificationStatus: TextView
     private lateinit var permissionsCard: LinearLayout
     
+    // Modern Activity Result Launcher for battery optimization
+    private val batteryOptimizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // Check status when returning from settings
+        val isIgnored = BatteryOptimizationHelper.onResumeCheck(this) { isOptimized ->
+            updateBatteryStatusUI(isOptimized)
+        }
+        if (!isIgnored) {
+            // Still not optimized - show warning
+            Toast.makeText(this, "⚠️ Ottimizzazione batteria ancora attiva", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "✅ Ottimizzazione batteria disattivata!", Toast.LENGTH_SHORT).show()
+        }
+        updatePermissionStatus()
+    }
+    
     private val requiredPermissions = mutableListOf(
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.READ_CALL_LOG
@@ -65,6 +84,11 @@ class MainActivity : AppCompatActivity() {
         // Always refresh permission status when returning to app
         android.util.Log.d(TAG, "onResume: Refreshing all permission statuses")
         updatePermissionStatus()
+        
+        // Check battery optimization status
+        BatteryOptimizationHelper.onResumeCheck(this) { isOptimized ->
+            updateBatteryStatusUI(isOptimized)
+        }
         
         // Force UI refresh
         permissionsCard.invalidate()
@@ -549,34 +573,25 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showBatteryDialog() {
-        val manufacturer = Build.MANUFACTURER.lowercase()
-        val isSamsung = manufacturer.contains("samsung")
-        
-        val message = if (isSamsung) {
-            "Per funzionare correttamente, PRONTO deve ignorare le ottimizzazioni batteria.\n\n" +
-            "Su Samsung:\n" +
-            "1. Tappa 'Disattiva Ottimizzazione'\n" +
-            "2. Se non funziona, vai in Impostazioni > Manutenzione dispositivo > Batteria\n" +
-            "3. Cerca PRONTO e seleziona 'Non controllata'\n\n" +
-            "⚠️ Se premi 'Non ora', l'app potrebbe non funzionare in background."
-        } else {
-            "Per funzionare quando il telefono è in standby, PRONTO deve ignorare le ottimizzazioni batteria.\n\n" +
-            "1. Tappa 'Disattiva Ottimizzazione'\n" +
-            "2. Nella schermata che si apre, seleziona 'Consenti'\n\n" +
-            "⚠️ Se premi 'Non ora', l'app potrebbe non funzionare durante le chiamate."
+        // Use the new helper with modern Activity Result API
+        BatteryOptimizationHelper.checkAndRequestBatteryOptimization(
+            this,
+            batteryOptimizationLauncher
+        ) { isOptimized ->
+            updateBatteryStatusUI(isOptimized)
+            if (isOptimized) {
+                // Continue with permission wizard if all good
+                startPermissionWizard()
+            }
         }
-        
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("⚠️ Ottimizzazione Batteria Richiesta")
-            .setMessage(message)
-            .setPositiveButton("Disattiva Ottimizzazione") { _, _ ->
-                requestBatteryOptimizationExemption()
-            }
-            .setNegativeButton("Non ora") { _, _ ->
-                Toast.makeText(this, "⚠️ Ricorda: l'app potrebbe essere chiusa da Android", Toast.LENGTH_LONG).show()
-            }
-            .setCancelable(false)
-            .show()
+    }
+    
+    /**
+     * Update battery status UI element
+     */
+    private fun updateBatteryStatusUI(isOptimized: Boolean) {
+        batteryStatus.text = if (isOptimized) "✅" else "❌"
+        batteryStatus.invalidate()
     }
     
     private fun requestBatteryOptimizationExemption() {
