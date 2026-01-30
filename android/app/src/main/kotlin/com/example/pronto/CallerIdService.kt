@@ -823,11 +823,11 @@ class CallerIdService : Service() {
             } catch (e: SecurityException) {
                 android.util.Log.e("CallerIdService", "Cannot answer call - missing permission: ${e.message}")
                 e.printStackTrace()
-                // Show toast on UI thread
+                // Show educational toast on UI thread
                 handler.post {
                     Toast.makeText(
                         this,
-                        "⚠️ Usa i pulsanti di sistema per rispondere", 
+                        "📞 Impossibile rispondere automaticamente. Usa il pulsante verde di sistema.", 
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -853,23 +853,32 @@ class CallerIdService : Service() {
                 // If endCall() returned false (common on Android 10+ without Default Dialer)
                 if (!success) {
                     android.util.Log.w("CallerIdService", "endCall() returned false - likely missing Default Dialer permission")
-                    // Show toast on UI thread
+                    // Show educational toast on UI thread
                     handler.post {
                         Toast.makeText(
                             this,
-                            "⚠️ Usa i pulsanti di sistema per rifiutare (Android 10+)",
+                            "📞 Overlay chiuso. Se la chiamata continua, usa il pulsante rosso di sistema per rifiutare.",
                             Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } else {
+                    // Success - show confirmation
+                    handler.post {
+                        Toast.makeText(
+                            this,
+                            "📞 Chiamata rifiutata",
+                            Toast.LENGTH_SHORT
                         ).show()
                     }
                 }
             } catch (e: SecurityException) {
                 android.util.Log.e("CallerIdService", "Cannot reject call - missing ANSWER_PHONE_CALLS permission: ${e.message}")
                 e.printStackTrace()
-                // Show toast explaining the limitation
+                // Show educational toast explaining the limitation
                 handler.post {
                     Toast.makeText(
                         this,
-                        "⚠️ Permesso mancante - usa i pulsanti di sistema", 
+                        "📞 Impossibile rifiutare automaticamente. Usa il pulsante rosso di sistema.", 
                         Toast.LENGTH_LONG
                     ).show()
                 }
