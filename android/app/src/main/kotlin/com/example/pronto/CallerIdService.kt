@@ -372,99 +372,118 @@ class CallerIdService : Service() {
             .replace("\"", "&quot;")
             .replace("'", "&#x27;")
         
+        // Compact heads-up notification style (matches React UI)
         val fallbackHtml = """
         <!DOCTYPE html>
         <html>
         <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-        <title>PRONTO - Fallback</title>
+        <title>PRONTO</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body {
                 min-height: 100vh;
-                background: linear-gradient(135deg, #0d9488 0%, #10b981 100%);
+                background: transparent;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 justify-content: center;
-                padding: 16px;
+                padding: 8px 12px;
             }
-            .card {
-                background: white;
-                border-radius: 32px;
-                width: 100%;
-                max-width: 360px;
-                overflow: hidden;
-                box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
-            }
-            .header {
-                background: linear-gradient(135deg, #115e59 0%, #0d9488 100%);
-                padding: 32px 24px;
-                text-align: center;
-            }
-            .avatar {
-                width: 72px;
-                height: 72px;
-                background: rgba(255,255,255,0.2);
-                border-radius: 50%;
-                margin: 0 auto 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 32px;
-            }
-            .header p { color: #5eead4; font-size: 13px; margin-bottom: 8px; }
-            .header h1 { color: white; font-size: 22px; font-weight: 600; margin-bottom: 4px; }
-            .header .number { color: #5eead4; font-size: 15px; }
-            .content { padding: 20px; }
-            .btn {
-                width: 100%;
-                padding: 16px;
-                border: none;
+            .notification {
+                background: rgba(15, 23, 42, 0.95);
+                backdrop-filter: blur(20px);
                 border-radius: 16px;
-                font-size: 16px;
-                font-weight: 600;
-                cursor: pointer;
-                margin-bottom: 12px;
+                width: 100%;
+                max-width: 320px;
+                overflow: hidden;
+                box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+                border: 1px solid rgba(255,255,255,0.1);
+            }
+            .row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px;
+            }
+            .icon {
+                width: 40px;
+                height: 40px;
+                background: rgba(20, 184, 166, 0.2);
+                border-radius: 50%;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 8px;
+                font-size: 18px;
+                flex-shrink: 0;
             }
-            .btn-whatsapp { background: #25D366; color: white; }
-            .btn-answer { background: #f1f5f9; color: #475569; }
-            .btn-reject { background: #ef4444; color: white; }
-            .btn-close { background: #f1f5f9; color: #64748b; font-size: 14px; padding: 12px; }
-            .row { display: flex; gap: 12px; margin-bottom: 12px; }
-            .row .btn { flex: 1; margin-bottom: 0; font-size: 14px; }
-            .footer { text-align: center; color: #5eead4; font-size: 11px; margin-top: 16px; opacity: 0.6; }
+            .info {
+                flex: 1;
+                min-width: 0;
+            }
+            .info .label {
+                color: rgba(255,255,255,0.6);
+                font-size: 11px;
+            }
+            .info .number {
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .btn-wa {
+                width: 40px;
+                height: 40px;
+                background: #25D366;
+                border: none;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                flex-shrink: 0;
+                font-size: 18px;
+            }
+            .btn-wa:active { transform: scale(0.9); }
+            .btn-close {
+                width: 32px;
+                height: 32px;
+                background: rgba(255,255,255,0.1);
+                border: none;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                flex-shrink: 0;
+                color: rgba(255,255,255,0.7);
+                font-size: 16px;
+            }
+            .btn-close:active { background: rgba(255,255,255,0.2); }
+            .footer {
+                text-align: center;
+                color: rgba(255,255,255,0.3);
+                font-size: 10px;
+                padding: 0 12px 8px;
+            }
         </style>
         </head>
         <body>
-        <div class="card">
-            <div class="header">
-                <div class="avatar">📞</div>
-                <p>Chiamata in arrivo</p>
-                <h1 id="callerName">Numero Sconosciuto</h1>
-                <p class="number" id="phoneNumber">$safeNumber</p>
-            </div>
-            <div class="content">
-                <button class="btn btn-whatsapp" onclick="action('WHATSAPP')">
-                    📱 Apri WhatsApp
-                </button>
-                <div class="row">
-                    <button class="btn btn-answer" onclick="action('ANSWER')">
-                        📞 Rispondi
-                    </button>
-                    <button class="btn btn-reject" onclick="action('REJECT')">
-                        📵 Rifiuta
-                    </button>
+        <div class="notification">
+            <div class="row">
+                <div class="icon">📞</div>
+                <div class="info">
+                    <p class="label">Chiamata in arrivo</p>
+                    <p class="number" id="phoneNumber">$safeNumber</p>
                 </div>
-                <button class="btn btn-close" onclick="action('CLOSE')">Chiudi</button>
+                <button class="btn-wa" onclick="action('WHATSAPP')" title="WhatsApp">💬</button>
+                <button class="btn-close" onclick="action('CLOSE')" title="Chiudi">✕</button>
             </div>
+            <p class="footer">PRONTO • tap WhatsApp per chattare</p>
         </div>
-        <p class="footer">PRONTO • WhatsApp Click-to-Chat (Fallback Mode)</p>
         <script>
             function action(type) {
                 console.log('Action:', type);
@@ -472,7 +491,6 @@ class CallerIdService : Service() {
                     window.Android.performAction(type);
                 }
             }
-            // Update number from Android bridge
             try {
                 if (window.Android && window.Android.getPhoneNumber) {
                     var num = window.Android.getPhoneNumber();
@@ -553,12 +571,30 @@ class CallerIdService : Service() {
 
     private fun openWhatsApp() {
         val cleanNumber = incomingNumber.replace(Regex("[^0-9+]"), "")
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("https://wa.me/$cleanNumber")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        android.util.Log.d("CallerIdService", "Opening WhatsApp for number: $cleanNumber")
+        
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("https://wa.me/$cleanNumber")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            android.util.Log.d("CallerIdService", "WhatsApp intent launched successfully")
+            // DON'T close overlay - let user return to call and close manually
+            // Overlay will auto-dismiss after timeout anyway
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Failed to open WhatsApp: ${e.message}")
+            // If WhatsApp fails, try browser fallback
+            try {
+                val browserIntent = Intent(Intent.ACTION_VIEW).apply {
+                    data = Uri.parse("https://wa.me/$cleanNumber")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(browserIntent)
+            } catch (e2: Exception) {
+                android.util.Log.e("CallerIdService", "Browser fallback also failed: ${e2.message}")
+            }
         }
-        startActivity(intent)
-        closeOverlay()
     }
 
     private fun answerCall() {
