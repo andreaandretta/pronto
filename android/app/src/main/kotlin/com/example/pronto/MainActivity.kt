@@ -218,10 +218,12 @@ class MainActivity : AppCompatActivity() {
         }
         
         val infoText = TextView(this).apply {
-            text = "Quando ricevi una chiamata, PRONTO mostra un pulsante per aprire rapidamente una chat WhatsApp con quel numero.\n\nPerfetto per rispondere via messaggio quando non puoi parlare."
+            text = "Quando ricevi una chiamata, PRONTO mostra " +
+                   "un pulsante per aprire WhatsApp con quel numero. " +
+                   "Perfetto per rispondere via messaggio."
             textSize = 13f
             setTextColor(0xFF94a3b8.toInt())
-            lineSpacingMultiplier = 1.4f
+            setLineSpacing(0f, 1.4f)
         }
         
         val versionText = TextView(this).apply {

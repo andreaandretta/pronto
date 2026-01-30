@@ -1,13 +1,49 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
+import MainActivityPreview from './MainActivityPreview.jsx';
 import './index.css';
 
 console.log('PRONTO: main.jsx loaded');
 
+// Check URL for preview mode
+const urlParams = new URLSearchParams(window.location.search);
+const showMainActivity = urlParams.get('view') === 'main';
+
+function PreviewSwitcher() {
+  const [view, setView] = useState(showMainActivity ? 'main' : 'overlay');
+  
+  return (
+    <div>
+      {/* View Toggle */}
+      <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 bg-slate-800 rounded-full p-1 flex gap-1 shadow-xl border border-slate-700">
+        <button
+          onClick={() => setView('overlay')}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+            view === 'overlay' ? 'bg-teal-500 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          📱 Overlay
+        </button>
+        <button
+          onClick={() => setView('main')}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+            view === 'main' ? 'bg-teal-500 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          🏠 Homepage
+        </button>
+      </div>
+      
+      {/* Content */}
+      {view === 'overlay' ? <App /> : <MainActivityPreview />}
+    </div>
+  );
+}
+
 try {
   const root = ReactDOM.createRoot(document.getElementById('root'));
-  root.render(<App />);
+  root.render(<PreviewSwitcher />);
   console.log('PRONTO: React rendered successfully');
   
   // Nascondi schermata di caricamento
