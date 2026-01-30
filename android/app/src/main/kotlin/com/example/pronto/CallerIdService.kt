@@ -616,6 +616,7 @@ class CallerIdService : Service() {
                     "WHATSAPP" -> {
                         android.util.Log.d("CallerIdService", ">>> BRIDGE: Opening WhatsApp")
                         openWhatsApp()
+                        // Note: closeOverlay() is now called inside openWhatsApp() after intent launch
                     }
                     "ANSWER" -> {
                         android.util.Log.d("CallerIdService", ">>> BRIDGE: Answering call")
@@ -736,6 +737,10 @@ class CallerIdService : Service() {
                 startActivity(intent)
             }
             android.util.Log.d("CallerIdService", "WhatsApp intent launched successfully")
+            
+            // FIX: Close overlay after opening WhatsApp
+            handler.postDelayed({ closeOverlay() }, 300) // Short delay to let WhatsApp open first
+            
         } catch (e: Exception) {
             android.util.Log.e("CallerIdService", "Failed to open WhatsApp: ${e.message}")
             // If WhatsApp fails, try browser fallback
