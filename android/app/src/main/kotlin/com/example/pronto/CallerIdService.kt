@@ -20,6 +20,7 @@ import android.telephony.TelephonyManager
 import android.view.Gravity
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
+import android.widget.Toast
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -812,13 +813,27 @@ class CallerIdService : Service() {
     }
 
     private fun answerCall() {
+        android.util.Log.d("CallerIdService", "Answering call...")
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
             try {
-                telecomManager.acceptRingingCall()
+                val success = telecomManager.acceptRingingCall()
+                android.util.Log.d("CallerIdService", "acceptRingingCall() executed")
             } catch (e: SecurityException) {
+                android.util.Log.e("CallerIdService", "Cannot answer call - missing permission: ${e.message}")
                 e.printStackTrace()
+                // Show toast on UI thread
+                handler.post {
+                    Toast.makeText(
+                        this,
+                        "⚠️ Usa i pulsanti di sistema per rispondere", 
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
+        } else {
+            android.util.Log.w("CallerIdService", "Cannot answer call - API level too low (requires API 26+)")
         }
         // Delay overlay close so user can see caller info briefly
         handler.postDelayed({ closeOverlay() }, 2000)  // 2 seconds delay
@@ -826,18 +841,44 @@ class CallerIdService : Service() {
 
     private fun rejectCall() {
         android.util.Log.d("CallerIdService", "Rejecting call...")
+        var rejectionSuccess = false
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
             try {
                 val success = telecomManager.endCall()
+                rejectionSuccess = success
                 android.util.Log.d("CallerIdService", "Call rejected via TelecomManager, success: $success")
+                
+                // If endCall() returned false (common on Android 10+ without Default Dialer)
+                if (!success) {
+                    android.util.Log.w("CallerIdService", "endCall() returned false - likely missing Default Dialer permission")
+                    // Show toast on UI thread
+                    handler.post {
+                        Toast.makeText(
+                            this,
+                            "⚠️ Usa i pulsanti di sistema per rifiutare (Android 10+)",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             } catch (e: SecurityException) {
                 android.util.Log.e("CallerIdService", "Cannot reject call - missing ANSWER_PHONE_CALLS permission: ${e.message}")
                 e.printStackTrace()
+                // Show toast explaining the limitation
+                handler.post {
+                    Toast.makeText(
+                        this,
+                        "⚠️ Permesso mancante - usa i pulsanti di sistema", 
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         } else {
             android.util.Log.w("CallerIdService", "Cannot reject call - API level too low (requires API 28+)")
         }
+        
+        // Always close overlay so user can interact with native call UI
         closeOverlay()
     }
 
