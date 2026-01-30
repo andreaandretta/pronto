@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusIcon: TextView
     private lateinit var overlayStatus: TextView
     private lateinit var batteryStatus: TextView
+    private lateinit var phoneStatus: TextView
+    private lateinit var notificationStatus: TextView
     private lateinit var permissionsCard: LinearLayout
     
     private val requiredPermissions = mutableListOf(
@@ -169,24 +171,43 @@ class MainActivity : AppCompatActivity() {
         }
         
         val permissionsTitle = TextView(this).apply {
-            text = "Configurazione"
+            text = "Autorizzazioni Richieste"
             textSize = 16f
             setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 0, 0, 16)
+        }
+        
+        val permissionsSubtitle = TextView(this).apply {
+            text = "Tutte le autorizzazioni sono necessarie per funzionare"
+            textSize = 12f
+            setTextColor(0xFF94a3b8.toInt())
             setPadding(0, 0, 0, 24)
         }
         
-        // Overlay permission row
-        val overlayRow = createPermissionRow("Overlay su altre app")
+        // 1. Overlay permission row
+        val overlayRow = createPermissionRow("Overlay su altre app", "Mostra pulsante durante chiamate")
         overlayStatus = overlayRow.second
+        overlayRow.first.setOnClickListener { showOverlayDialog() }
         
-        // Battery permission row
-        val batteryRow = createPermissionRow("Ottimizzazione batteria")
+        // 2. Phone state permission row
+        val phoneRow = createPermissionRow("Stato telefono", "Rileva chiamate in arrivo")
+        phoneStatus = phoneRow.second
+        phoneRow.first.setOnClickListener { requestPhonePermissions() }
+        
+        // 3. Notification permission row (Android 13+)
+        val notificationRow = createPermissionRow("Notifiche", "Mostra notifica servizio attivo")
+        notificationStatus = notificationRow.second
+        notificationRow.first.setOnClickListener { requestNotificationPermission() }
+        
+        // 4. Battery permission row
+        val batteryRow = createPermissionRow("Ottimizzazione batteria", "Funziona in background")
         batteryStatus = batteryRow.second
+        batteryRow.first.setOnClickListener { showBatteryDialog() }
         
-        // Configure button
+        // Configure ALL button
         val configureButton = Button(this).apply {
-            text = "Configura Permessi"
+            text = "🔧 Configura Tutti i Permessi"
             setTextColor(Color.WHITE)
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
@@ -196,7 +217,12 @@ class MainActivity : AppCompatActivity() {
         }
         
         permissionsCard.addView(permissionsTitle)
+        permissionsCard.addView(permissionsSubtitle)
         permissionsCard.addView(overlayRow.first)
+        permissionsCard.addView(phoneRow.first)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissionsCard.addView(notificationRow.first)
+        }
         permissionsCard.addView(batteryRow.first)
         permissionsCard.addView(configureButton, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -264,26 +290,49 @@ class MainActivity : AppCompatActivity() {
         ).apply { bottomMargin = 32 }
     }
     
-    private fun createPermissionRow(label: String): Pair<LinearLayout, TextView> {
+    private fun createPermissionRow(label: String, subtitle: String): Pair<LinearLayout, TextView> {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 12, 0, 12)
+            setPadding(16, 16, 16, 16)
+            background = GradientDrawable().apply {
+                setColor(0xFF334155.toInt())
+                cornerRadius = 12f
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = 12 }
+        }
+        
+        val textContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
         val labelView = TextView(this).apply {
             text = label
             textSize = 14f
             setTextColor(0xFFe2e8f0.toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            typeface = Typeface.DEFAULT_BOLD
         }
+        
+        val subtitleView = TextView(this).apply {
+            text = subtitle
+            textSize = 11f
+            setTextColor(0xFF94a3b8.toInt())
+        }
+        
+        textContainer.addView(labelView)
+        textContainer.addView(subtitleView)
         
         val statusView = TextView(this).apply {
             text = "⏳"
-            textSize = 14f
+            textSize = 20f
+            setPadding(16, 0, 0, 0)
         }
         
-        row.addView(labelView)
+        row.addView(textContainer)
         row.addView(statusView)
         
         return Pair(row, statusView)
@@ -328,6 +377,17 @@ class MainActivity : AppCompatActivity() {
         val hasOverlay = Settings.canDrawOverlays(this)
         overlayStatus.text = if (hasOverlay) "✅" else "❌"
         
+        // Check phone permissions
+        val hasPhone = ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+                       ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        phoneStatus.text = if (hasPhone) "✅" else "❌"
+        
+        // Check notification permission (Android 13+)
+        val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else true
+        notificationStatus.text = if (hasNotification) "✅" else "❌"
+        
         // Check battery optimization
         val hasBattery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -336,8 +396,11 @@ class MainActivity : AppCompatActivity() {
         batteryStatus.text = if (hasBattery) "✅" else "❌"
         
         // Hide permissions card if all granted
-        val allGranted = hasOverlay && hasBattery && checkRuntimePermissions()
+        val allGranted = hasOverlay && hasPhone && hasNotification && hasBattery
         permissionsCard.visibility = if (allGranted) View.GONE else View.VISIBLE
+        
+        // Log status for debugging
+        android.util.Log.d(TAG, "Permissions: overlay=$hasOverlay, phone=$hasPhone, notification=$hasNotification, battery=$hasBattery")
     }
     
     private fun checkRuntimePermissions(): Boolean {
@@ -353,7 +416,24 @@ class MainActivity : AppCompatActivity() {
             return
         }
         
-        // Step 2: Check battery
+        // Step 2: Check phone permissions
+        val hasPhone = ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+                       ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        if (!hasPhone) {
+            requestPhonePermissions()
+            return
+        }
+        
+        // Step 3: Check notification permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotification = ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            if (!hasNotification) {
+                requestNotificationPermission()
+                return
+            }
+        }
+        
+        // Step 4: Check battery optimization
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
@@ -362,19 +442,28 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
-        // Step 3: Check runtime permissions
-        val missing = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        
-        if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), PERMISSION_REQUEST_CODE)
-            return
-        }
-        
         // All done!
         Toast.makeText(this, "✅ Configurazione completata!", Toast.LENGTH_SHORT).show()
         updatePermissionStatus()
+    }
+    
+    private fun requestPhonePermissions() {
+        val phonePermissions = arrayOf(
+            android.Manifest.permission.READ_PHONE_STATE,
+            android.Manifest.permission.READ_CALL_LOG,
+            android.Manifest.permission.ANSWER_PHONE_CALLS
+        )
+        ActivityCompat.requestPermissions(this, phonePermissions, PERMISSION_REQUEST_CODE)
+    }
+    
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ActivityCompat.requestPermissions(
+                this, 
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 
+                PERMISSION_REQUEST_CODE
+            )
+        }
     }
     
     private fun showOverlayDialog() {
@@ -456,7 +545,9 @@ class MainActivity : AppCompatActivity() {
         
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                Toast.makeText(this, "✅ Tutti i permessi concessi!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ Permessi concessi!", Toast.LENGTH_SHORT).show()
+                // Continue wizard to get remaining permissions
+                startPermissionWizard()
             } else {
                 Toast.makeText(this, "⚠️ Alcuni permessi mancanti", Toast.LENGTH_LONG).show()
             }
