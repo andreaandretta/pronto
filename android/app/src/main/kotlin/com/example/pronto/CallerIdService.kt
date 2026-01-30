@@ -98,6 +98,14 @@ class CallerIdService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Check if this is an update action
+        if (intent?.action == "UPDATE_NUMBER") {
+            val newNumber = sanitizePhoneNumber(intent.getStringExtra("phone_number"))
+            android.util.Log.d("CallerIdService", "UPDATE_NUMBER received: $newNumber")
+            updatePhoneNumber(newNumber)
+            return START_NOT_STICKY
+        }
+        
         // Race condition check: prevent duplicate overlays
         if (!isOverlayActive.compareAndSet(false, true)) {
             android.util.Log.w("CallerIdService", "Overlay already active, ignoring duplicate start")
@@ -130,6 +138,41 @@ class CallerIdService : Service() {
         handler.postDelayed(autoDismissRunnable, AUTO_DISMISS_TIMEOUT)
         
         return START_NOT_STICKY
+    }
+    
+    private fun updatePhoneNumber(newNumber: String) {
+        if (newNumber == incomingNumber) {
+            android.util.Log.d("CallerIdService", "Number unchanged: $newNumber")
+            return
+        }
+        
+        incomingNumber = newNumber
+        pendingNumber = newNumber
+        
+        // Update UI via React bridge if ready
+        if (reactReady) {
+            android.util.Log.d("CallerIdService", "React ready, sending updated number: $newNumber")
+            sendPhoneNumberToReact()
+        } else {
+            android.util.Log.d("CallerIdService", "React not ready yet, number will be sent when ready")
+        }
+        
+        // Also update fallback HTML if being used
+        webView?.evaluateJavascript(
+            """
+            (function() {
+                var display = document.getElementById('phone-display');
+                if (display) {
+                    display.textContent = ${JSONObject.quote(newNumber)};
+                    return 'Updated to: ${newNumber}';
+                }
+                return 'Element not found';
+            })();
+            """.trimIndent(),
+            { result ->
+                android.util.Log.d("CallerIdService", "Fallback HTML update result: $result")
+            }
+        )
     }
 
     private fun showOverlay() {

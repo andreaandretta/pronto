@@ -15,15 +15,20 @@ class CallReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "CallReceiver"
         private const val DEBOUNCE_MS = 500L
+        private const val PRIVATE_NUMBER_DELAY_MS = 1500L // Wait 1.5s for real number
         
         // Race condition prevention: atomic flag for service start
         private val isStartingService = AtomicBoolean(false)
         private var lastRingingTime = 0L
         
-        // BUG FIX: Track if we're waiting for real number after null first event
-        private var pendingPrivateNumber = false
+        // Track service state
         private var serviceStarted = false
+        private var currentServiceNumber: String? = null
     }
+    
+    // Handler for delayed operations - cancellable
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingNumberRunnable: Runnable? = null
     
     // Sanitize phone number to prevent injection
     private fun sanitizePhoneNumber(input: String?): String {
@@ -59,31 +64,52 @@ class CallReceiver : BroadcastReceiver() {
             
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
-                    // BUG FIX: Android sends RINGING twice:
+                    // CRITICAL FIX: Android sends RINGING twice:
                     // 1st event: number=null (broadcast before number is known)
                     // 2nd event: number=real (after system resolves the number)
                     // We must WAIT for the real number, not show "Numero Privato" immediately
                     
                     if (phoneNumber.isNullOrEmpty()) {
-                        Log.d(TAG, "RINGING with null number - waiting for second event with real number")
-                        // Don't start service yet - wait for the event with the actual number
-                        // Schedule a delayed start in case the second event never comes (truly private number)
-                        if (!pendingPrivateNumber) {
-                            pendingPrivateNumber = true
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                if (pendingPrivateNumber && !serviceStarted) {
-                                    Log.d(TAG, "No real number received after delay - truly private number")
-                                    pendingPrivateNumber = false
-                                    startCallerIdService(context, "Numero Privato")
-                                }
-                            }, 800) // Wait 800ms for real number
+                        Log.d(TAG, "RINGING with null number - scheduling 'Numero Privato' in ${PRIVATE_NUMBER_DELAY_MS}ms")
+                        
+                        // Cancel any existing timer
+                        pendingNumberRunnable?.let { handler.removeCallbacks(it) }
+                        
+                        // Schedule delayed "Numero Privato" - will be cancelled if real number arrives
+                        pendingNumberRunnable = Runnable {
+                            if (!serviceStarted) {
+                                Log.d(TAG, "No real number received after delay - showing 'Numero Privato'")
+                                startCallerIdService(context, "Numero Privato")
+                            }
                         }
+                        handler.postDelayed(pendingNumberRunnable!!, PRIVATE_NUMBER_DELAY_MS)
+                        
                         return
                     }
                     
-                    // We have a real number! Cancel pending private number timer
-                    pendingPrivateNumber = false
-                    serviceStarted = true
+                    // We have a real number!
+                    val sanitizedNumber = sanitizePhoneNumber(phoneNumber)
+                    Log.d(TAG, "Real number received: $sanitizedNumber")
+                    
+                    // Cancel pending "Numero Privato" timer
+                    pendingNumberRunnable?.let { 
+                        handler.removeCallbacks(it)
+                        Log.d(TAG, "Cancelled 'Numero Privato' timer - real number arrived")
+                    }
+                    pendingNumberRunnable = null
+                    
+                    // Check if service already running with "Numero Privato" - update it!
+                    if (serviceStarted && currentServiceNumber == "Numero Privato") {
+                        Log.d(TAG, "Service already running with 'Numero Privato' - updating to: $sanitizedNumber")
+                        updateCallerIdService(context, sanitizedNumber)
+                        return
+                    }
+                    
+                    // Check if service already running with same number - ignore duplicate
+                    if (serviceStarted && currentServiceNumber == sanitizedNumber) {
+                        Log.d(TAG, "Service already running with same number - ignoring")
+                        return
+                    }
                     
                     // Debounce: prevent duplicate RINGING with same number
                     val now = System.currentTimeMillis()
@@ -93,16 +119,19 @@ class CallReceiver : BroadcastReceiver() {
                     }
                     lastRingingTime = now
                     
-                    val sanitizedNumber = sanitizePhoneNumber(phoneNumber)
-                    Log.d(TAG, "Incoming call from: $sanitizedNumber")
+                    Log.d(TAG, "Starting service for: $sanitizedNumber")
                     startCallerIdService(context, sanitizedNumber)
                 }
                 TelephonyManager.EXTRA_STATE_IDLE,
                 TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                     Log.d(TAG, "Call ended or answered")
-                    isStartingService.set(false) // Reset atomic flag
-                    pendingPrivateNumber = false  // Reset pending flag
-                    serviceStarted = false        // Reset started flag
+                    // Cancel any pending timers
+                    pendingNumberRunnable?.let { handler.removeCallbacks(it) }
+                    pendingNumberRunnable = null
+                    // Reset state flags
+                    isStartingService.set(false)
+                    serviceStarted = false
+                    currentServiceNumber = null
                     stopCallerIdService(context)
                 }
                 else -> {
@@ -114,6 +143,7 @@ class CallReceiver : BroadcastReceiver() {
             e.printStackTrace()
             // Reset flags on crash to prevent stuck state
             isStartingService.set(false)
+            pendingNumberRunnable?.let { handler.removeCallbacks(it) }
         }
     }
 
@@ -134,7 +164,9 @@ class CallReceiver : BroadcastReceiver() {
             } else {
                 context.startService(serviceIntent)
             }
-            Log.d(TAG, "CallerIdService started")
+            serviceStarted = true
+            currentServiceNumber = phoneNumber
+            Log.d(TAG, "CallerIdService started with number: $phoneNumber")
             
             // Reset flag after short delay to allow future starts
             Handler(Looper.getMainLooper()).postDelayed({
@@ -142,7 +174,24 @@ class CallReceiver : BroadcastReceiver() {
             }, 1000)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting service: ${e.message}")
-            isStartingService.set(false) // Reset on error
+            isStartingService.set(false)
+            serviceStarted = false
+        }
+    }
+    
+    private fun updateCallerIdService(context: Context, phoneNumber: String) {
+        // Send update to existing service
+        val updateIntent = Intent(context, CallerIdService::class.java).apply {
+            action = "UPDATE_NUMBER"
+            putExtra("phone_number", phoneNumber)
+        }
+        
+        try {
+            context.startService(updateIntent)
+            currentServiceNumber = phoneNumber
+            Log.d(TAG, "CallerIdService updated with new number: $phoneNumber")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating service: ${e.message}")
         }
     }
 
