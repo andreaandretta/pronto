@@ -332,13 +332,13 @@ class CallerIdService : Service() {
             return
         }
         
-        // Fallback: se dopo 10 secondi React non segnala ready, usa fallback
+        // Fallback: se dopo 3 secondi React non segnala ready, usa fallback
         handler.postDelayed({
             if (!reactReady) {
-                android.util.Log.w("CallerIdService", "React not ready after 10s, using fallback")
+                android.util.Log.w("CallerIdService", "React not ready after 3s, using fallback")
                 loadFallbackHtml()
             }
-        }, 10000)  // Increased from 8s to 10s
+        }, 3000)  // Reduced from 10s to 3s for faster UX
     }
 
     private fun sendPhoneNumberToReact() {
@@ -573,23 +573,44 @@ class CallerIdService : Service() {
 
     private fun openWhatsApp() {
         val cleanNumber = incomingNumber.replace(Regex("[^0-9+]"), "")
-        android.util.Log.d("CallerIdService", "Opening WhatsApp for number: $cleanNumber")
+        android.util.Log.d("CallerIdService", "Opening WhatsApp for number: '$cleanNumber' (original: '$incomingNumber')")
         
         try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse("https://wa.me/$cleanNumber")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            // Check if number is empty or private
+            if (cleanNumber.isBlank() || cleanNumber.length < 5) {
+                android.util.Log.d("CallerIdService", "Number is empty/too short, opening WhatsApp main app")
+                // Open WhatsApp main app instead of specific chat
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    setPackage("com.whatsapp")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    // WhatsApp not installed, try browser
+                    val browserIntent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://wa.me/")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(browserIntent)
+                }
+            } else {
+                // Remove + prefix for wa.me format (some phones need this)
+                val waNumber = if (cleanNumber.startsWith("+")) cleanNumber.substring(1) else cleanNumber
+                android.util.Log.d("CallerIdService", "Opening wa.me/$waNumber")
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = Uri.parse("https://wa.me/$waNumber")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(intent)
             }
-            startActivity(intent)
             android.util.Log.d("CallerIdService", "WhatsApp intent launched successfully")
-            // DON'T close overlay - let user return to call and close manually
-            // Overlay will auto-dismiss after timeout anyway
         } catch (e: Exception) {
             android.util.Log.e("CallerIdService", "Failed to open WhatsApp: ${e.message}")
             // If WhatsApp fails, try browser fallback
             try {
                 val browserIntent = Intent(Intent.ACTION_VIEW).apply {
-                    data = Uri.parse("https://wa.me/$cleanNumber")
+                    data = Uri.parse("https://web.whatsapp.com/")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(browserIntent)
@@ -613,13 +634,18 @@ class CallerIdService : Service() {
     }
 
     private fun rejectCall() {
+        android.util.Log.d("CallerIdService", "Rejecting call...")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
             try {
-                telecomManager.endCall()
+                val success = telecomManager.endCall()
+                android.util.Log.d("CallerIdService", "Call rejected via TelecomManager, success: $success")
             } catch (e: SecurityException) {
+                android.util.Log.e("CallerIdService", "Cannot reject call - missing ANSWER_PHONE_CALLS permission: ${e.message}")
                 e.printStackTrace()
             }
+        } else {
+            android.util.Log.w("CallerIdService", "Cannot reject call - API level too low (requires API 28+)")
         }
         closeOverlay()
     }
