@@ -156,17 +156,22 @@ class CallerIdService : Service() {
                 return
             }
 
+            // FIX: Use FLAG_NOT_TOUCH_MODAL to allow touch pass-through behind overlay
+            // Position at top with WRAP_CONTENT height so native call buttons remain accessible
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,  // Only cover card area, not full screen
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or  // Allow touch behind overlay
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                         WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
                 PixelFormat.TRANSLUCENT
             )
-            params.gravity = Gravity.CENTER
+            // Position at top of screen with some margin
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            params.y = 50  // 50px from top
 
             // Initialize WebView on main thread with try-catch
             initWebViewSafely(params)
@@ -187,6 +192,11 @@ class CallerIdService : Service() {
             }
             
             webView = WebView(this).apply {
+            // FIX Issue 2: Make WebView focusable and clickable for button interaction
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
+            
             // Configurazione WebView estesa
             settings.apply {
                 javaScriptEnabled = true
@@ -209,7 +219,10 @@ class CallerIdService : Service() {
             
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             
+            // FIX: Add JavaScript interface BEFORE loading content
+            // Use both "Android" and "AndroidInterface" for compatibility
             addJavascriptInterface(AndroidBridge(), "Android")
+            addJavascriptInterface(AndroidBridge(), "AndroidInterface")
             
             // WebChromeClient per logging console JavaScript
             webChromeClient = object : WebChromeClient() {
@@ -285,22 +298,45 @@ class CallerIdService : Service() {
         
         // Verifica che il file esista prima di caricarlo
         try {
-            assets.open("www/index.html").close()
-            android.util.Log.d("CallerIdService", "Asset file exists, loading...")
+            // Check if main index.html exists
+            val indexStream = assets.open("www/index.html")
+            val indexSize = indexStream.available()
+            indexStream.close()
+            android.util.Log.d("CallerIdService", "Asset www/index.html exists, size: $indexSize bytes")
+            
+            // Also check assets subfolder
+            try {
+                val assetsList = assets.list("www/assets")
+                android.util.Log.d("CallerIdService", "www/assets contains ${assetsList?.size ?: 0} files: ${assetsList?.joinToString()}")
+            } catch (e: Exception) {
+                android.util.Log.w("CallerIdService", "Could not list www/assets: ${e.message}")
+            }
+            
             webView?.loadUrl(assetPath)
         } catch (e: Exception) {
             android.util.Log.e("CallerIdService", "Asset file not found: ${e.message}")
+            android.util.Log.e("CallerIdService", "Listing android_asset contents:")
+            try {
+                val rootAssets = assets.list("") ?: arrayOf()
+                android.util.Log.e("CallerIdService", "Root assets: ${rootAssets.joinToString()}")
+                if (rootAssets.contains("www")) {
+                    val wwwAssets = assets.list("www") ?: arrayOf()
+                    android.util.Log.e("CallerIdService", "www/ assets: ${wwwAssets.joinToString()}")
+                }
+            } catch (listError: Exception) {
+                android.util.Log.e("CallerIdService", "Failed to list assets: ${listError.message}")
+            }
             loadFallbackHtml()
             return
         }
         
-        // Fallback: se dopo 8 secondi React non segnala ready, usa fallback
+        // Fallback: se dopo 10 secondi React non segnala ready, usa fallback
         handler.postDelayed({
             if (!reactReady) {
-                android.util.Log.w("CallerIdService", "React not ready after 8s, using fallback")
+                android.util.Log.w("CallerIdService", "React not ready after 10s, using fallback")
                 loadFallbackHtml()
             }
-        }, 8000)
+        }, 10000)  // Increased from 8s to 10s
     }
 
     private fun sendPhoneNumberToReact() {
@@ -454,32 +490,64 @@ class CallerIdService : Service() {
     inner class AndroidBridge {
         @JavascriptInterface
         fun performAction(action: String) {
-            android.util.Log.d("CallerIdService", "Action received: $action")
-            when (action.uppercase()) {
-                "WHATSAPP" -> openWhatsApp()
-                "ANSWER" -> answerCall()
-                "REJECT" -> rejectCall()
-                "CLOSE" -> closeOverlay()
+            android.util.Log.d("CallerIdService", ">>> BRIDGE: performAction called with: $action")
+            handler.post {
+                android.util.Log.d("CallerIdService", ">>> BRIDGE: Executing action on main thread: $action")
+                when (action.uppercase()) {
+                    "WHATSAPP" -> {
+                        android.util.Log.d("CallerIdService", ">>> BRIDGE: Opening WhatsApp")
+                        openWhatsApp()
+                    }
+                    "ANSWER" -> {
+                        android.util.Log.d("CallerIdService", ">>> BRIDGE: Answering call")
+                        answerCall()
+                    }
+                    "REJECT" -> {
+                        android.util.Log.d("CallerIdService", ">>> BRIDGE: Rejecting call")
+                        rejectCall()
+                    }
+                    "CLOSE" -> {
+                        android.util.Log.d("CallerIdService", ">>> BRIDGE: Closing overlay")
+                        closeOverlay()
+                    }
+                    else -> {
+                        android.util.Log.w("CallerIdService", ">>> BRIDGE: Unknown action: $action")
+                    }
+                }
             }
         }
         
         @JavascriptInterface
         fun getPhoneNumber(): String {
+            android.util.Log.d("CallerIdService", ">>> BRIDGE: getPhoneNumber called, returning: $incomingNumber")
             return incomingNumber
         }
         
         @JavascriptInterface
         fun log(message: String) {
-            android.util.Log.d("WebViewJS", message)
+            android.util.Log.d("WebViewJS", ">>> JS LOG: $message")
         }
         
         @JavascriptInterface
         fun onReactReady() {
-            android.util.Log.d("CallerIdService", "React reported ready, sending phone number")
+            android.util.Log.d("CallerIdService", ">>> BRIDGE: React reported ready, sending phone number")
             reactReady = true
             handler.post {
                 sendPhoneNumberToReact()
             }
+        }
+        
+        // Additional bridge methods for direct actions
+        @JavascriptInterface
+        fun closeOverlay() {
+            android.util.Log.d("CallerIdService", ">>> BRIDGE: closeOverlay() called directly")
+            handler.post { this@CallerIdService.closeOverlay() }
+        }
+        
+        @JavascriptInterface
+        fun openWhatsApp(number: String?) {
+            android.util.Log.d("CallerIdService", ">>> BRIDGE: openWhatsApp() called with: $number")
+            handler.post { this@CallerIdService.openWhatsApp() }
         }
     }
 
@@ -545,8 +613,9 @@ class CallerIdService : Service() {
         
         webView?.let { wv ->
             try {
-                // Remove JavaScript interface to prevent memory leaks
+                // Remove JavaScript interfaces to prevent memory leaks
                 wv.removeJavascriptInterface("Android")
+                wv.removeJavascriptInterface("AndroidInterface")
                 
                 // Remove from WindowManager
                 windowManager?.removeView(wv)
