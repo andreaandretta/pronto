@@ -353,12 +353,40 @@ class MainActivity : AppCompatActivity() {
     
     private fun loadSavedState() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val isEnabled = prefs.getBoolean(KEY_ENABLED, true)
+        var isEnabled = prefs.getBoolean(KEY_ENABLED, true)
+        
+        // CRITICAL FIX: If permissions not granted, force disable
+        if (isEnabled && !checkAllPermissionsGranted()) {
+            android.util.Log.w(TAG, "Saved state was ENABLED but permissions missing - forcing disable")
+            isEnabled = false
+            // Update saved state to match
+            prefs.edit().putBoolean(KEY_ENABLED, false).apply()
+        }
+        
         mainToggle.isChecked = isEnabled
         onToggleChanged(isEnabled)
     }
     
     private fun onToggleChanged(isEnabled: Boolean) {
+        // CRITICAL FIX: Check permissions before enabling
+        if (isEnabled && !checkAllPermissionsGranted()) {
+            // If permissions missing, disable toggle and show error
+            mainToggle.isChecked = false
+            statusText.text = "❌ Concedi tutti i permessi prima di attivare"
+            statusText.setTextColor(0xFFef4444.toInt()) // red
+            statusIcon.text = "🚫"
+            permissionsCard.visibility = View.VISIBLE
+            Toast.makeText(this, "⚠️ Concedi tutti i permessi in 'Configura Tutti i Permessi'", Toast.LENGTH_LONG).show()
+            android.util.Log.w(TAG, "User tried to enable PRONTO without all permissions")
+            
+            // Save as disabled
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_ENABLED, false)
+                .apply()
+            return
+        }
+        
         // Save state
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
@@ -369,6 +397,7 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "Attivo - In ascolto chiamate"
             statusText.setTextColor(0xFF10b981.toInt()) // green
             statusIcon.text = "⚡"
+            Toast.makeText(this, "✅ PRONTO attivo!", Toast.LENGTH_SHORT).show()
             android.util.Log.d(TAG, "PRONTO enabled")
         } else {
             statusText.text = "In pausa - Overlay disattivato"
@@ -376,6 +405,21 @@ class MainActivity : AppCompatActivity() {
             statusIcon.text = "💤"
             android.util.Log.d(TAG, "PRONTO disabled")
         }
+    }
+    
+    private fun checkAllPermissionsGranted(): Boolean {
+        val hasOverlay = Settings.canDrawOverlays(this)
+        val hasPhone = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+                       ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else true
+        val hasBattery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } else true
+        
+        return hasOverlay && hasPhone && hasNotification && hasBattery
     }
     
     private fun updatePermissionStatus() {

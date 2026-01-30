@@ -70,6 +70,7 @@ class CallerIdService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForegroundSafely()
+        registerNetworkCallback()
     }
     
     /**
