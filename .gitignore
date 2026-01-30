@@ -137,3 +137,15 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Android local properties (contains local SDK paths)
+android/local.properties
+
+# Android build outputs
+android/.gradle/
+android/app/build/
+android/build/
+
+# Frontend build output (copied to android assets during build)
+frontend/dist/
+frontend/node_modules/

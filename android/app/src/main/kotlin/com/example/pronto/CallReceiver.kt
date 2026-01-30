@@ -4,13 +4,28 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.TelephonyManager
 import android.util.Log
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CallReceiver : BroadcastReceiver() {
     
     companion object {
         private const val TAG = "CallReceiver"
+        private const val DEBOUNCE_MS = 500L
+        
+        // Race condition prevention: atomic flag for service start
+        private val isStartingService = AtomicBoolean(false)
+        private var lastRingingTime = 0L
+    }
+    
+    // Sanitize phone number to prevent injection
+    private fun sanitizePhoneNumber(input: String?): String {
+        if (input.isNullOrBlank()) return "Numero Privato"
+        // Whitelist: only digits, +, spaces, dashes, parentheses
+        return input.replace(Regex("[^0-9+\\s\\-()]"), "").take(20)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,12 +37,22 @@ class CallReceiver : BroadcastReceiver() {
             
             when (state) {
                 TelephonyManager.EXTRA_STATE_RINGING -> {
-                    Log.d(TAG, "Incoming call from: $phoneNumber")
-                    startCallerIdService(context, phoneNumber ?: "Numero Privato")
+                    // Debounce: prevent duplicate RINGING broadcasts
+                    val now = System.currentTimeMillis()
+                    if (now - lastRingingTime < DEBOUNCE_MS) {
+                        Log.d(TAG, "Debounced duplicate RINGING event")
+                        return
+                    }
+                    lastRingingTime = now
+                    
+                    val sanitizedNumber = sanitizePhoneNumber(phoneNumber)
+                    Log.d(TAG, "Incoming call from: $sanitizedNumber")
+                    startCallerIdService(context, sanitizedNumber)
                 }
                 TelephonyManager.EXTRA_STATE_IDLE,
                 TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                     Log.d(TAG, "Call ended or answered")
+                    isStartingService.set(false) // Reset atomic flag
                     stopCallerIdService(context)
                 }
             }
@@ -35,6 +60,12 @@ class CallReceiver : BroadcastReceiver() {
     }
 
     private fun startCallerIdService(context: Context, phoneNumber: String) {
+        // Atomic check to prevent duplicate service starts (race condition fix)
+        if (!isStartingService.compareAndSet(false, true)) {
+            Log.d(TAG, "Service already starting, skipping duplicate")
+            return
+        }
+        
         val serviceIntent = Intent(context, CallerIdService::class.java).apply {
             putExtra("phone_number", phoneNumber)
         }
@@ -46,8 +77,14 @@ class CallReceiver : BroadcastReceiver() {
                 context.startService(serviceIntent)
             }
             Log.d(TAG, "CallerIdService started")
+            
+            // Reset flag after short delay to allow future starts
+            Handler(Looper.getMainLooper()).postDelayed({
+                isStartingService.set(false)
+            }, 1000)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting service: ${e.message}")
+            isStartingService.set(false) // Reset on error
         }
     }
 

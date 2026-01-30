@@ -1,106 +1,105 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+
+// XSS Protection: whitelist-based sanitization
+const sanitizePhoneNumber = (input) => {
+  if (typeof input !== 'string') return ''
+  // Allow only digits, +, -, spaces, parentheses
+  return input.replace(/[^0-9+\-\s()]/g, '').slice(0, 20)
+}
+
+const sanitizeCallerName = (input) => {
+  if (typeof input !== 'string') return ''
+  // Allow only alphanumeric, spaces, common punctuation
+  return input.replace(/[^a-zA-Z0-9\s.,'-]/g, '').slice(0, 50)
+}
 
 export default function App() {
   const [phoneNumber, setPhoneNumber] = useState('+39 333 1234567')
   const [callerName, setCallerName] = useState('Numero Sconosciuto')
-  const [isReady, setIsReady] = useState(false)
-  const reactReadySent = useRef(false)
-
-  useEffect(() => {
-    console.log('PRONTO: App mounted, setting up bridge...')
-    
-    // Leggi il numero dal parametro URL (passato dall'Android)
-    const urlParams = new URLSearchParams(window.location.search)
-    const phone = urlParams.get('phone')
-    if (phone) {
-      setPhoneNumber(decodeURIComponent(phone))
+  
+  // Memory leak prevention: track component mount state
+  const mountedRef = useRef(true)
+  const readySignalSent = useRef(false)
+  
+  // Safe state setters that check mount status
+  const safeSetPhoneNumber = useCallback((number) => {
+    if (mountedRef.current) {
+      setPhoneNumber(sanitizePhoneNumber(number))
     }
-
-    // Esponi le funzioni globalmente per Android Bridge
-    window.setPhoneNumber = (number) => {
-      console.log('PRONTO: setPhoneNumber called with:', number)
-      setPhoneNumber(number)
-    }
-    
-    window.setCallerName = (name) => {
-      console.log('PRONTO: setCallerName called with:', name)
-      setCallerName(name)
-    }
-    
-    window.updateCallerInfo = (number, name) => {
-      console.log('PRONTO: updateCallerInfo called:', number, name)
-      if (number) setPhoneNumber(number)
-      if (name) setCallerName(name)
-    }
-    
-    // Prova a ottenere il numero dal bridge Android se disponibile
-    if (window.Android && window.Android.getPhoneNumber) {
-      try {
-        const num = window.Android.getPhoneNumber()
-        if (num) setPhoneNumber(num)
-      } catch (e) {
-        console.log('PRONTO: Could not get phone number from Android bridge')
-      }
-    }
-    
-    // Segnala a Kotlin che React è pronto (HANDSHAKE)
-    // Usa un ref per evitare invii multipli
-    if (!reactReadySent.current) {
-      reactReadySent.current = true
-      
-      // Piccolo delay per assicurarsi che tutto sia renderizzato
-      const timer = setTimeout(() => {
-        if (window.Android && window.Android.onReactReady) {
-          try {
-            window.Android.onReactReady()
-            console.log('PRONTO: Sent onReactReady to Android')
-          } catch (e) {
-            console.error('PRONTO: Error sending onReactReady:', e)
-          }
-        } else {
-          console.log('PRONTO: Android bridge not available (browser mode)')
-        }
-        
-        // Segna come pronto e nascondi loading
-        setIsReady(true)
-        if (window.hideLoading) {
-          window.hideLoading()
-        }
-      }, 100)
-      
-      return () => {
-        clearTimeout(timer)
-        console.log('PRONTO: App unmounting')
-      }
+  }, [])
+  
+  const safeSetCallerName = useCallback((name) => {
+    if (mountedRef.current) {
+      setCallerName(sanitizeCallerName(name))
     }
   }, [])
 
-  const action = (type) => {
-    console.log('PRONTO: Action:', type)
-    // Chiama il bridge Android se disponibile
-    if (window.Android && window.Android.performAction) {
+  useEffect(() => {
+    mountedRef.current = true
+    
+    // Read number from URL parameter (passed from Android)
+    const urlParams = new URLSearchParams(window.location.search)
+    const phone = urlParams.get('phone')
+    if (phone) {
+      safeSetPhoneNumber(decodeURIComponent(phone))
+    }
+
+    // Expose function globally for Android bridge
+    window.setPhoneNumber = (number) => {
+      safeSetPhoneNumber(number)
+    }
+    
+    window.setCallerName = (name) => {
+      safeSetCallerName(name)
+    }
+    
+    // Signal to Android that React is ready (prevent race condition)
+    if (!readySignalSent.current && window.Android?.onReactReady) {
+      readySignalSent.current = true
       try {
-        window.Android.performAction(type)
+        window.Android.onReactReady()
       } catch (e) {
-        console.error('PRONTO: Android bridge error:', e)
+        console.error('Failed to signal React ready:', e)
+      }
+    }
+    
+    // Cleanup on unmount - prevents memory leaks
+    return () => {
+      mountedRef.current = false
+      delete window.setPhoneNumber
+      delete window.setCallerName
+    }
+  }, [safeSetPhoneNumber, safeSetCallerName])
+
+  // Action whitelist for security
+  const VALID_ACTIONS = ['WHATSAPP', 'ANSWER', 'REJECT', 'CLOSE']
+  
+  const action = useCallback((type) => {
+    // Validate action against whitelist
+    const upperType = String(type).toUpperCase()
+    if (!VALID_ACTIONS.includes(upperType)) {
+      console.warn('Invalid action rejected:', type)
+      return
+    }
+    
+    console.log('Action:', upperType)
+    // Call Android bridge if available
+    if (window.Android?.performAction) {
+      try {
+        window.Android.performAction(upperType)
+      } catch (e) {
+        console.error('Bridge action failed:', e)
       }
     } else {
-      console.log('PRONTO: Android bridge not available - browser mode')
-      // In browser mode, mostra un alert
-      alert('Azione: ' + type + ' per ' + phoneNumber)
+      console.log('Android bridge not available - browser mode')
     }
-  }
-
-  // Se non ancora pronto, mostra nulla (la schermata di caricamento HTML gestisce tutto)
-  if (!isReady) {
-    return null
-  }
+  }, [])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-700 via-teal-600 to-emerald-500 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         {/* Card principale */}
-        <div className="bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-fadeIn">
+        <div className="bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
           {/* Header con icona */}
           <div className="bg-gradient-to-br from-teal-800 to-teal-700 pt-8 pb-12 px-6 text-center">
             <div className="w-20 h-20 mx-auto bg-gray-500/30 rounded-full flex items-center justify-center mb-4">

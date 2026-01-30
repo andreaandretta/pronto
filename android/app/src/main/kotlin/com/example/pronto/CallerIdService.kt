@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.telecom.TelecomManager
 import android.view.Gravity
 import android.view.WindowManager
@@ -23,6 +24,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CallerIdService : Service() {
     private var webView: WebView? = null
@@ -31,6 +33,27 @@ class CallerIdService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var reactReady: Boolean = false
     private var pendingNumber: String? = null
+    
+    // Battery optimization: WakeLock with timeout
+    private var wakeLock: PowerManager.WakeLock? = null
+    private val WAKELOCK_TIMEOUT = 60_000L // 60 seconds max
+    
+    // Race condition prevention
+    private val isOverlayActive = AtomicBoolean(false)
+    
+    // Auto-dismiss timer for battery/memory protection
+    private val AUTO_DISMISS_TIMEOUT = 60_000L // 60 seconds
+    private val autoDismissRunnable = Runnable {
+        android.util.Log.w("CallerIdService", "Auto-dismissing overlay after timeout")
+        closeOverlay()
+    }
+    
+    // Sanitize phone number input
+    private fun sanitizePhoneNumber(input: String?): String {
+        if (input.isNullOrBlank()) return ""
+        // Whitelist: only digits, +, spaces, dashes, parentheses
+        return input.replace(Regex("[^0-9+\\s\\-()]"), "").take(20)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,11 +64,37 @@ class CallerIdService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        incomingNumber = intent?.getStringExtra("phone_number") ?: ""
+        // Race condition check: prevent duplicate overlays
+        if (!isOverlayActive.compareAndSet(false, true)) {
+            android.util.Log.w("CallerIdService", "Overlay already active, ignoring duplicate start")
+            return START_NOT_STICKY
+        }
+        
+        // Sanitize input to prevent XSS
+        incomingNumber = sanitizePhoneNumber(intent?.getStringExtra("phone_number"))
         reactReady = false
         pendingNumber = incomingNumber
+        
+        // Acquire WakeLock to keep CPU running during overlay (battery optimized with timeout)
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "PRONTO::CallerIdWakeLock"
+            ).apply {
+                acquire(WAKELOCK_TIMEOUT)
+            }
+            android.util.Log.d("CallerIdService", "WakeLock acquired with ${WAKELOCK_TIMEOUT}ms timeout")
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Failed to acquire WakeLock: ${e.message}")
+        }
+        
         android.util.Log.d("CallerIdService", "Starting overlay for number: $incomingNumber")
         showOverlay()
+        
+        // Schedule auto-dismiss for battery protection
+        handler.postDelayed(autoDismissRunnable, AUTO_DISMISS_TIMEOUT)
+        
         return START_NOT_STICKY
     }
 
@@ -379,22 +428,47 @@ class CallerIdService : Service() {
     }
 
     private fun closeOverlay() {
+        // Prevent multiple close calls
+        if (!isOverlayActive.compareAndSet(true, false)) {
+            android.util.Log.d("CallerIdService", "Overlay already closed, skipping")
+            return
+        }
+        
         android.util.Log.d("CallerIdService", "Closing overlay and destroying WebView")
+        
+        // Cancel auto-dismiss timer
+        handler.removeCallbacks(autoDismissRunnable)
         handler.removeCallbacksAndMessages(null)
+        
+        // Release WakeLock to save battery
+        try {
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    android.util.Log.d("CallerIdService", "WakeLock released")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CallerIdService", "Error releasing WakeLock: ${e.message}")
+        }
+        wakeLock = null
         
         webView?.let { wv ->
             try {
-                // Rimuovi dal WindowManager
+                // Remove JavaScript interface to prevent memory leaks
+                wv.removeJavascriptInterface("Android")
+                
+                // Remove from WindowManager
                 windowManager?.removeView(wv)
                 
-                // Pulizia completa WebView per evitare memory leak
+                // Complete WebView cleanup to prevent memory leaks
                 wv.stopLoading()
                 wv.loadUrl("about:blank")
                 wv.clearHistory()
                 wv.removeAllViews()
                 wv.clearCache(true)
                 
-                // Distruggi il WebView
+                // Destroy the WebView
                 wv.destroy()
                 
                 android.util.Log.d("CallerIdService", "WebView destroyed successfully")
