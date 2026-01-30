@@ -157,9 +157,9 @@ class CallerIdService : Service() {
             }
 
             // FIX: Use FLAG_NOT_TOUCH_MODAL to allow touch pass-through behind overlay
-            // Position at top with WRAP_CONTENT height so native call buttons remain accessible
+            // Use WRAP_CONTENT for both width and height so touches outside card go through
             val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,  // CRITICAL: Not MATCH_PARENT - blocks side touches
                 WindowManager.LayoutParams.WRAP_CONTENT,  // Only cover card area, not full screen
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -169,7 +169,7 @@ class CallerIdService : Service() {
                         WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
                 PixelFormat.TRANSLUCENT
             )
-            // Position at top of screen with some margin
+            // Position at top center of screen
             params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             params.y = 50  // 50px from top
 
