@@ -228,15 +228,32 @@ class CallReceiver : BroadcastReceiver() {
 
     private fun stopCallerIdService(context: Context) {
         try {
+            // NUCLEAR OPTION: First try to bind and force close
+            try {
+                val forceCloseIntent = Intent(context, CallerIdService::class.java).apply {
+                    action = "FORCE_CLOSE"
+                }
+                context.startService(forceCloseIntent)
+            } catch (e: Exception) {
+                Log.w(TAG, "Force close intent failed: ${e.message}")
+            }
+            
+            // Standard stopService
             val intent = Intent(context, CallerIdService::class.java)
-            // Try stopService multiple times to ensure it stops
             val stopped = context.stopService(intent)
             Log.d(TAG, "CallerIdService stopService result: $stopped")
             
-            // Also send explicit STOP action in case service needs to clean up
+            // Try multiple times with delay
             if (!stopped) {
-                Log.w(TAG, "First stopService returned false, trying again...")
-                context.stopService(intent)
+                Log.w(TAG, "First stopService returned false, retrying...")
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try {
+                        context.stopService(intent)
+                        Log.d(TAG, "Second stopService attempted")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Second stop failed: ${e.message}")
+                    }
+                }, 100)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping service: ${e.message}")

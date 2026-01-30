@@ -98,6 +98,13 @@ class CallerIdService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // EMERGENCY: Force close action
+        if (intent?.action == "FORCE_CLOSE") {
+            android.util.Log.d("CallerIdService", "FORCE_CLOSE action received - emergency shutdown")
+            closeOverlay()
+            return START_NOT_STICKY
+        }
+        
         // Check if this is an update action
         if (intent?.action == "UPDATE_NUMBER") {
             val newNumber = sanitizePhoneNumber(intent.getStringExtra("phone_number"))
@@ -827,7 +834,22 @@ class CallerIdService : Service() {
         webView = null
         reactReady = false
         pendingNumber = null
+        
+        // CRITICAL: Stop foreground to remove notification and allow service to die
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        
         stopSelf()
+    }
+    
+    // Emergency force close - called when call state is IDLE
+    fun forceClose() {
+        android.util.Log.d("CallerIdService", "EMERGENCY FORCE CLOSE triggered")
+        closeOverlay()
     }
 
     private fun createNotificationChannel() {
